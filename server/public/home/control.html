@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Control</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #e8e8e8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      color: #888;
+      margin-bottom: 20px;
+      letter-spacing: 0.05em;
+    }
+
+    .card {
+      background: #1e1e1e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-icon {
+      font-size: 2.5rem;
+    }
+
+    .status-label {
+      font-size: 1.4rem;
+      font-weight: 600;
+    }
+
+    .status-clean .status-label { color: #4caf50; }
+    .status-detected .status-label { color: #f44336; }
+    .status-unknown .status-label { color: #888; }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 0.75rem;
+      color: #555;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .heartbeat-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #555;
+      margin-right: 6px;
+      transition: background 0.3s;
+    }
+    .heartbeat-dot.alive { background: #4caf50; }
+    .heartbeat-dot.stale { background: #f44336; }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 0.7rem;
+      color: #444;
+      text-align: right;
+    }
+
+    #clock {
+      font-size: 0.85rem;
+      color: #555;
+      text-align: right;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="clock">--:--:--</div>
+  <h1>🏠 Home Control</h1>
+
+  <div class="card" id="catwatch-card">
+    <div class="card-title">🐱 猫トイレ監視</div>
+    <div class="status-row status-unknown" id="status-row">
+      <span class="status-icon" id="status-icon">⏳</span>
+      <span class="status-label" id="status-label">接続中...</span>
+    </div>
+    <div class="meta">
+      <div>
+        <span class="heartbeat-dot" id="heartbeat-dot"></span>
+        <span id="heartbeat-label">OrangePi: 確認中</span>
+      </div>
+      <div id="last-event-label"></div>
+    </div>
+  </div>
+
+  <div class="footer" id="footer"></div>
+
+  <script>
+    // 時計
+    function updateClock() {
+      document.getElementById('clock').textContent =
+        new Date().toLocaleTimeString('ja-JP');
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ハートビート監視（60秒以上途絶えたら stale）
+    const HEARTBEAT_TIMEOUT_SEC = 60;
+    let lastHeartbeat = null;
+
+    function updateHeartbeatUI() {
+      const dot = document.getElementById('heartbeat-dot');
+      const label = document.getElementById('heartbeat-label');
+      if (lastHeartbeat === null) {
+        dot.className = 'heartbeat-dot';
+        label.textContent = 'OrangePi: 未受信';
+        return;
+      }
+      const ageSec = Math.floor(Date.now() / 1000) - lastHeartbeat;
+      if (ageSec < HEARTBEAT_TIMEOUT_SEC) {
+        dot.className = 'heartbeat-dot alive';
+        label.textContent = `OrangePi: 稼働中 (${ageSec}秒前)`;
+      } else {
+        dot.className = 'heartbeat-dot stale';
+        label.textContent = `OrangePi: 応答なし (${ageSec}秒前)`;
+      }
+    }
+    setInterval(updateHeartbeatUI, 5000);
+
+    function formatTime(ts) {
+      return new Date(ts * 1000).toLocaleString('ja-JP');
+    }
+
+    function applyState(detection, lastEvent) {
+      const row = document.getElementById('status-row');
+      const icon = document.getElementById('status-icon');
+      const label = document.getElementById('status-label');
+      const eventLabel = document.getElementById('last-event-label');
+
+      row.className = 'status-row status-' + (detection || 'unknown');
+
+      if (detection === 'clean') {
+        icon.textContent = '✅';
+        label.textContent = 'きれいです';
+      } else if (detection === 'detected') {
+        icon.textContent = '💩';
+        label.textContent = '糞を検知！';
+      } else {
+        icon.textContent = '⏳';
+        label.textContent = '確認中...';
+      }
+
+      if (lastEvent) {
+        const typeLabel = lastEvent.type === 'detection_alert' ? '検知' : '清掃完了';
+        eventLabel.textContent = `最終イベント: ${typeLabel} (${formatTime(lastEvent.timestamp)})`;
+      }
+    }
+
+    // SSE 接続
+    function connectSSE() {
+      const es = new EventSource('/home/api/catwatch/stream');
+
+      es.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+
+        if (data.type === 'heartbeat') {
+          lastHeartbeat = data.timestamp;
+          updateHeartbeatUI();
+          return;
+        }
+
+        if (data.type === 'init') {
+          lastHeartbeat = data.lastHeartbeat;
+          applyState(data.detection, data.lastEvent);
+          updateHeartbeatUI();
+          return;
+        }
+
+        if (data.type === 'detection_alert' || data.type === 'cleanup_detected') {
+          applyState(data.detection, { type: data.type, timestamp: data.timestamp });
+          return;
+        }
+      };
+
+      es.onerror = () => {
+        document.getElementById('footer').textContent = '接続エラー - 再接続中...';
+        es.close();
+        setTimeout(connectSSE, 5000);
+      };
+
+      es.onopen = () => {
+        document.getElementById('footer').textContent = '';
+      };
+    }
+
+    connectSSE();
+  </script>
+</body>
+</html>

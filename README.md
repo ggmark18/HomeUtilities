@@ -1,36 +1,33 @@
-# BusCheck
+# Yurinoki Home Utilities
 
-**Even G2 スマートグラスと スマートフォンで、リアルタイムにバスの運行状況を確認するアプリケーションです。**
-
-東洋バス「ゆりのき台第三 → 八千代中央駅」の次のバス時刻・遅延情報・停留所通過状況を、グラスのHUD表示とスマートフォンのWeb画面の両方で確認できます。
+ゆりのき台の自宅環境向けホームオートメーションシステム。バスの運行情報確認と猫トイレ監視の2つの機能を統合したプラットフォームです。
 
 ---
 
-## 特徴
+## システム全体構成
 
-- **Even G2 グラス表示** — 次のバスの予定時刻・予測時刻・残り分数・停留所通過情報をHUDに表示
-- **スマートフォン Web画面** — ブラウザからいつでも確認。30秒ごとに自動更新
-- **リアルタイム時計** — 秒単位の現在時刻を常時表示
-- **オンデマンド起動** — スクレイパーサーバーはリクエスト時のみ起動し、1時間無通信で自動終了（EC2コスト削減）
-- **Basic認証** — ApacheのBasic認証でWebとプラグイン両方のアクセスを保護
+```
+【自宅 OrangePi】
+  poop_detector.py   ─ ATOM Cam を監視 → 糞検知
+  cleaner_control.py ─ LINE 通知 + DEEBOT 停止
+        ↓ HTTP POST (Webhook)
+【AWS EC2】
+  Node.js (HomeUtilities サーバー)
+        ↓ SSE
+【ブラウザ / Even G2 グラス / スマートフォン】
+  www.cetacea.jp/home/control  ─ ホームダッシュボード
+  www.cetacea.jp/bus/          ─ バス運行情報
+```
 
 ---
 
-## システム構成
+## 機能一覧
 
-```
-Even G2 グラス
-    ↕ Bluetooth
-スマートフォン（Even Hub WebView）
-    ↕ HTTPS（Wi-Fi / モバイルデータ）
-Apache（リバースプロキシ + Basic認証）
-    ↕ localhost:3000
-AWS EC2 — gateway.js（常駐・軽量）
-    ↕ オンデマンド起動
-AWS EC2 — server.js（Puppeteer・1時間で自動終了）
-    ↕ Headless Chrome
-東洋バス bus-navigation.jp
-```
+| 機能 | 説明 | アクセス先 |
+|---|---|---|
+| **BusCheck** | 東洋バス運行情報（Even G2 / Web） | `/bus/` |
+| **CatPoopWatch** | 猫トイレ監視・LINE通知 | OrangePi 常駐 |
+| **Home Control** | ホームダッシュボード（猫トイレ状態） | `/home/control` |
 
 ---
 
@@ -38,209 +35,313 @@ AWS EC2 — server.js（Puppeteer・1時間で自動終了）
 
 ```
 BusCheck/
-├── plugin/           # Even Hub プラグイン（Vite + TypeScript）
-│   ├── src/main.ts   # プラグイン本体
-│   └── app.json      # パッケージ設定・ネットワーク許可リスト
-└── server/           # EC2サーバー（Node.js）
-    ├── gateway.js    # 常駐プロセス（ポート3000）
-    ├── server.js     # Puppeteerワーカー（ポート3001）
-    ├── scraper.js    # 東洋バスサイトのスクレイパー
+├── plugin/                   # Even Hub プラグイン（Vite + TypeScript）
+│   ├── src/main.ts
+│   └── app.json
+└── server/                   # EC2 Node.js サーバー
+    ├── gateway.js            # 常駐プロセス（ポート3000）
+    ├── server.js             # Puppeteer ワーカー（ポート3001）
+    ├── scraper.js            # 東洋バスサイトスクレイパー
+    ├── routes/
+    │   └── catwatch.js       # CatPoopWatch API（SSE・Webhook受信）
     └── public/
-        └── index.html  # スマートフォン用Web画面
+        ├── index.html        # バス情報 Web 画面
+        └── home/
+            └── control.html  # ホームダッシュボード
+
+CatPoopWatch/                 # OrangePi 上で動作
+    ├── poop_detector.py      # カメラ監視・糞検知
+    ├── cleaner_control.py    # LINE通知・DEEBOT制御
+    ├── get_ecovacs_token.py  # ECOVACS トークン取得（初回のみ）
+    ├── get_group_id.py       # LINE グループID取得用
+    ├── requirements.txt
+    └── .env                  # 環境変数（Git 管理外）
 ```
 
 ---
 
-## セットアップ手順
+## 1. BusCheck
 
-### 1. EC2サーバーのセットアップ
+東洋バス「ゆりのき台第三 → 八千代中央駅」の次のバス時刻・遅延情報・停留所通過状況を、Even G2 グラスの HUD とスマートフォン Web 画面で確認できます。
 
-#### 1-1. 必要パッケージのインストール
+### 特徴
 
-**Ubuntu 22.04 の場合:**
+- **Even G2 グラス表示** — 次のバスの予定時刻・予測時刻・残り分数・停留所通過情報を HUD に表示
+- **スマートフォン Web 画面** — ブラウザからいつでも確認。30秒ごとに自動更新
+- **オンデマンド起動** — スクレイパーサーバーはリクエスト時のみ起動し、1時間無通信で自動終了（EC2 コスト削減）
+- **Basic 認証** — Apache の Basic 認証でアクセスを保護
+
+### API エンドポイント
+
+| エンドポイント | 説明 |
+|---|---|
+| `GET /bus/api/bus` | 次のバス一覧 |
+| `GET /bus/api/health` | ヘルスチェック |
+| `GET /bus/api/debug` | スクレイピング生データ（調整用） |
+
+### EC2 セットアップ
+
 ```bash
-# Node.js 20.x
+# Node.js 20.x インストール（Ubuntu）
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
+sudo apt-get install -y nodejs chromium-browser \
+  libgbm-dev libasound2 libxss1 libxtst6 libxrandr2 libxcomposite1 libxdamage1 libxfixes3
 
-# Chromium と依存ライブラリ
-sudo apt-get install -y chromium-browser \
-  libgbm-dev libasound2 libxss1 libxtst6 \
-  libxrandr2 libxcomposite1 libxdamage1 libxfixes3
-
-# PM2
+# PM2 インストール
 sudo npm install -g pm2
+
+# デプロイ
+scp -r ./server/* ec2-user@54.178.201.84:~/homeutils/
+ssh ec2-user@54.178.201.84 "cd ~/homeutils && npm install"
+
+# 起動・常駐化
+pm2 start gateway.js --name homeutils-gateway
+pm2 startup && pm2 save
 ```
 
-**Amazon Linux 2 の場合:**
-```bash
-curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-sudo yum install -y nodejs chromium
-sudo npm install -g pm2
-```
-
-#### 1-2. サーバーコードをデプロイ
-
-```bash
-# ローカルから EC2 へ転送
-scp -r ./server/* ec2-user@YOUR_EC2_IP:~/buscheck/
-
-# EC2上で依存パッケージをインストール
-ssh ec2-user@YOUR_EC2_IP
-cd ~/buscheck && npm install
-```
-
-#### 1-3. PM2でゲートウェイを起動・常駐化
-
-```bash
-cd ~/buscheck
-pm2 start gateway.js --name buscheck-gateway
-pm2 startup   # 表示されたコマンドを実行
-pm2 save
-```
-
-#### 1-4. 動作確認
-
-```bash
-curl http://localhost:3000/api/health
-curl http://localhost:3000/api/bus
-```
-
----
-
-### 2. Apache の設定（リバースプロキシ + Basic認証）
-
-```bash
-# モジュール有効化
-sudo a2enmod proxy proxy_http
-sudo systemctl restart apache2
-```
+### Apache 設定（BusCheck）
 
 ```apache
-<VirtualHost *:443>
-    ServerName YOUR_DOMAIN
-
-    # Basic認証（Web・プラグイン共通）
-    <Location /bus/>
-        AuthType Basic
-        AuthName "BusCheck"
-        AuthUserFile /etc/apache2/.htpasswd
+# Basic 認証
+<Location /bus/>
+    AuthType Basic
+    AuthName "BusCheck"
+    AuthUserFile /etc/apache2/.htpasswd
+    <LimitExcept OPTIONS>
         Require valid-user
-    </Location>
+    </LimitExcept>
+</Location>
 
-    # 静的ファイルを直接配信
-    Alias /bus /home/bus/server/public
-    <Directory /home/bus/server/public>
-        Require all granted
-    </Directory>
+# 静的ファイル
+Alias /bus /home/homeutils/server/public
+<Directory /home/homeutils/server/public>
+    Require all granted
+</Directory>
 
-    # APIのみプロキシ（Aliasより前に記述）
-    ProxyPass        /bus/api/ http://localhost:3000/api/
-    ProxyPassReverse /bus/api/ http://localhost:3000/api/
-</VirtualHost>
+# API プロキシ
+ProxyPass        /bus/api/ http://localhost:3000/api/
+ProxyPassReverse /bus/api/ http://localhost:3000/api/
 ```
 
-```bash
-# ユーザー作成
-htpasswd -c /etc/apache2/.htpasswd YOUR_USERNAME
-```
-
-#### EC2 セキュリティグループ
-
-- ポート **443**（HTTPS）: 開放
-- ポート **3000**: **削除**（外部から直接アクセス不可にする）
-
----
-
-### 3. 認証情報・URLの設定
-
-**`plugin/.env`（プラグイン用・ビルド時に埋め込まれる）:**
-```
-VITE_API_BASE=https://YOUR_DOMAIN/bus
-VITE_AUTH_USER=YOUR_USERNAME
-VITE_AUTH_PASS=YOUR_PASSWORD
-```
-
-**`plugin/app.json` のホワイトリスト:**
-```json
-"whitelist": ["https://YOUR_DOMAIN"]
-```
-
-**`server/.env`（サーバー用・実行時に読み込まれる）:**
-```
-AUTH_USER=YOUR_USERNAME
-AUTH_PASS=YOUR_PASSWORD
-```
-
----
-
-### 4. Even Hub プラグインのビルドと実行
-
-#### ローカル開発（シミュレーター）
+### Even Hub プラグイン ビルド
 
 ```bash
 cd plugin
 npm install
-npm run dev          # Viteサーバー起動（localhost:5173）
+npm run build   # dist/ を生成
+npm run pack    # buscheck.ehpk を生成
 ```
 
-#### ビルドとパッケージング
+[https://hub.evenrealities.com/hub](https://hub.evenrealities.com/hub) に `buscheck.ehpk` をアップロードしてインストール。
 
-```bash
-cd plugin
-npm run build        # dist/ を生成
-npm run pack         # buscheck.ehpk を生成
-```
-
-#### 実機インストール（Even Hub ポータル経由）
-
-1. [https://hub.evenrealities.com/hub](https://hub.evenrealities.com/hub) にアクセスしてログイン
-2. `buscheck.ehpk` をアップロード
-3. iPhone の Even Realities アプリに自動的に反映される
-
-アップロード後は Even Realities アプリの Even Hub タブからアプリを起動できます。
-
-#### 一般公開
-
-同じポータルから公開申請を行うと、すべての G2 ユーザーが Even Hub ストアからインストールできるようになります。
-
----
-
-## 操作方法
-
-### Even G2 グラス / R1 リング
+### 操作方法（Even G2）
 
 | 操作 | 動作 |
 |---|---|
-| アプリ起動 | 自動でバス情報を取得・表示 |
-| シングルプレス | バス情報を再取得（キャッシュ使用） |
-| ダブルプレス | バス情報を強制再取得（最新） |
-| スワイプ上下 | 画面スクロール |
-| バックグラウンド移動 | 自動更新を停止 |
-| フォアグラウンド復帰 | 自動でバス情報を再取得 |
+| シングルプレス | バス情報を再取得 |
+| ダブルプレス | 強制再取得（最新） |
 
 自動更新: **15秒**ごと
 
-### Web画面
+---
 
-| 操作 | 動作 |
+## 2. CatPoopWatch
+
+ATOM Cam で猫トイレを監視し、糞を検知したら LINE に通知するシステム。OrangePi 上で常駐動作する。
+
+### システム構成
+
+```
+ATOM Cam (RTSP: 192.168.1.21:8554)
+    ↓ ffmpeg（20秒ごとにスナップショット取得）
+poop_detector.py（背景差分で糞を検知）
+    ↓ MQTT (192.168.1.7:1883)
+cleaner_control.py（LINE 通知 + DEEBOT 停止試行）
+    ↓ HTTP POST Webhook
+EC2 Node.js（ダッシュボードへ状態反映）
+```
+
+### 検知ロジック
+
+1. 20秒ごとに ATOM Cam から静止画を取得
+2. ROI（猫トイレ領域）を切り出して背景差分を計算
+3. 3回連続で差分を検知したら「確定」→ アラート発火
+4. 糞を取り除くと3回連続クリーン検知で自動リセット
+5. 1時間ごとに背景画像を自動更新（アラート未検出時のみ）
+
+### MQTT トピック
+
+| トピック | 方向 | 内容 |
+|---|---|---|
+| `alert/cat_poop` | detector → control | 糞検知アラート |
+| `control/cat_poop_reset` | control → detector | 清掃完了・リセット |
+
+### Webhook イベント（EC2 へ送信）
+
+| イベント | タイミング |
 |---|---|
-| ブラウザでアクセス | `https://YOUR_DOMAIN/bus/` |
-| ダブルタップ | 強制再取得 |
+| `detection_alert` | 糞検知確定時 |
+| `cleanup_detected` | 清掃完了自動検知時 |
+| `heartbeat` | 20秒ごと（死活監視） |
 
-自動更新: **30秒**ごと
+### 前提条件（OrangePi）
+
+- Mosquitto インストール・起動済み
+- `ffmpeg` インストール済み
+- ATOM Cam に atomcam_tools インストール済み・RTSP 有効化済み
+- Python 3.11 以上
+
+### OrangePi セットアップ
+
+```bash
+cd ~/CatPoopWatch
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+`.env` ファイルを作成:
+
+```
+LINE_CHANNEL_TOKEN=your_line_channel_token
+ECOVACS_ACCOUNT=your_ecovacs_email
+ECOVACS_PASSWORD=your_ecovacs_password
+CATWATCH_WEBHOOK_URL=https://www.cetacea.jp/home/api/catwatch/event
+CATWATCH_SECRET=your_secret_token
+```
+
+### デプロイ（Mac → OrangePi）
+
+```bash
+# 初回・更新時
+rsync -av --exclude='venv' --exclude='__pycache__' \
+  ~/Develop/CatPoopWatch/ mark@192.168.1.7:~/CatPoopWatch/
+
+# サービス再起動
+ssh mark@192.168.1.7 "sudo systemctl restart poop-detector cleaner-control"
+```
+
+### systemd サービス登録
+
+```bash
+sudo nano /etc/systemd/system/poop-detector.service
+```
+
+```ini
+[Unit]
+Description=Cat Poop Detector
+After=network.target mosquitto.service
+
+[Service]
+User=mark
+WorkingDirectory=/home/mark/CatPoopWatch
+EnvironmentFile=/home/mark/CatPoopWatch/.env
+ExecStart=/home/mark/CatPoopWatch/venv/bin/python poop_detector.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo nano /etc/systemd/system/cleaner-control.service
+```
+
+```ini
+[Unit]
+Description=Cat Poop Cleaner Control
+After=network.target mosquitto.service
+
+[Service]
+User=mark
+WorkingDirectory=/home/mark/CatPoopWatch
+EnvironmentFile=/home/mark/CatPoopWatch/.env
+ExecStart=/home/mark/CatPoopWatch/venv/bin/python cleaner_control.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable poop-detector cleaner-control
+sudo systemctl start poop-detector cleaner-control
+```
+
+### ログ確認
+
+```bash
+sudo journalctl -u poop-detector -f
+sudo journalctl -u cleaner-control -f
+```
+
+### 手動テスト（MQTT アラート送信）
+
+```bash
+mosquitto_pub -h 192.168.1.7 -p 1883 -t "alert/cat_poop" -m "detected"
+```
+
+### DEEBOT 自動制御について
+
+> **2026年7月時点で、日本では ECOVACS API による DEEBOT 制御は不可能。** 以下の手段をすべて試みたが失敗：
+> - `get_ecovacs_token.py`: メール送信 API がエラー（code 0002）
+> - `sucks` ライブラリ: Pearl は XMPP 非対応
+> - `deebot-client 3.0.2`: アプリバージョン古すぎ（code 1013）
+> - `deebot-client 6.0.2`: `/user/login` エンドポイントが日本で封鎖
+>
+> 糞検知時の LINE 通知は正常に動作するため、DEEBOT の停止は ECOVACS HOME アプリから手動で行うこと。日本で API が開放された際に備え、DEEBOT 制御コードはそのまま残してある。
 
 ---
 
-## デバッグ
+## 3. Home Control ダッシュボード
+
+`www.cetacea.jp/home/control` で猫トイレの状態をリアルタイムに確認できる Web ダッシュボード。
+
+### API エンドポイント
+
+| エンドポイント | 説明 |
+|---|---|
+| `POST /home/api/catwatch/event` | OrangePi からのイベント受信（Bearer 認証） |
+| `GET /home/api/catwatch/status` | 現在の状態取得 |
+| `GET /home/api/catwatch/stream` | SSE リアルタイムストリーム |
+
+### Apache 設定（Home Control）
+
+```apache
+# Home Control（認証なし・家族向け）
+ProxyPass        /home/api/ http://localhost:3000/home/api/
+ProxyPassReverse /home/api/ http://localhost:3000/home/api/
+
+Alias /home /home/homeutils/server/public/home
+<Directory /home/homeutils/server/public/home>
+    Require all granted
+</Directory>
+```
+
+### EC2 環境変数（`server/.env`）
+
+```
+AUTH_USER=your_username
+AUTH_PASS=your_password
+BEHIND_APACHE=true
+CATWATCH_SECRET=your_secret_token  # OrangePi の .env と同じ値
+```
+
+---
+
+## 共通デバッグコマンド
 
 ```bash
-# スクレイピング生データの確認
-curl -u YOUR_USERNAME:YOUR_PASSWORD \
-  https://YOUR_DOMAIN/bus/api/debug | python3 -m json.tool
-
 # PM2 管理
-pm2 logs buscheck-gateway   # ログ確認
-pm2 restart buscheck-gateway # 再起動
-pm2 stop buscheck-gateway    # 停止
+pm2 logs homeutils-gateway
+pm2 restart homeutils-gateway
+
+# バス API 確認
+curl -u USER:PASS https://www.cetacea.jp/bus/api/health
+
+# CatPoopWatch 状態確認
+curl https://www.cetacea.jp/home/api/catwatch/status
 ```

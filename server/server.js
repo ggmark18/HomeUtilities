@@ -6,6 +6,8 @@ const express = require('express');
 const path = require('path');
 const { scrapeBusInfo } = require('./scraper');
 
+const catwatchRouter = require('./routes/catwatch');
+
 const app = express();
 
 // スマホ用ウェブUI（public/index.html）
@@ -24,6 +26,12 @@ app.get('/api/config', (req, res) => {
 
 app.use(express.static(publicDir));
 app.get('/', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+
+// HomeUtilities: /home/*
+app.use('/home/api/catwatch', catwatchRouter);
+app.get('/home/control', (req, res) =>
+  res.sendFile(path.join(publicDir, 'home', 'control.html'))
+);
 
 // ゲートウェイ経由で起動された場合はポート3001、単独起動は3000
 const IS_WORKER = process.env.BUSCHECK_WORKER === '1';
