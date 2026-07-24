@@ -4,34 +4,12 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
-const { scrapeBusInfo } = require('./scraper');
 
-const catwatchRouter = require('./routes/catwatch');
+const busRouter = require('./features/bus/routes');
+const catwatchRouter = require('./features/catwatch/routes');
 
 const app = express();
-
-// スマホ用ウェブUI（public/index.html）
 const publicDir = path.join(__dirname, 'public');
-
-// 認証設定を返す API（Apache の ProxyPass /bus/api/ 経由でアクセスされる）
-app.get('/api/config', (req, res) => {
-  const user = process.env.AUTH_USER || '';
-  const pass = process.env.AUTH_PASS || '';
-  const header = user
-    ? 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
-    : '';
-  res.set('Cache-Control', 'no-store');
-  res.json({ auth: header });
-});
-
-app.use(express.static(publicDir));
-app.get('/', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
-
-// HomeUtilities: /home/*
-app.use('/home/api/catwatch', catwatchRouter);
-app.get('/home/control', (req, res) =>
-  res.sendFile(path.join(publicDir, 'home', 'control.html'))
-);
 
 // ゲートウェイ経由で起動された場合はポート3001、単独起動は3000
 const IS_WORKER = process.env.BUSCHECK_WORKER === '1';
@@ -51,12 +29,6 @@ const idleTimer = setInterval(() => {
   }
 }, 60_000);
 idleTimer.unref(); // プロセス終了を妨げない
-
-// キャッシュ設定（スクレイピング結果を1分間保持）
-const CACHE_TTL_MS = 60 * 1000;
-let cache = null;
-let cacheTimestamp = 0;
-let pendingFetch = null; // 同時リクエストの重複スクレイピング防止
 
 // リクエストログ＋最終リクエスト時刻の更新
 app.use((req, res, next) => {
@@ -81,70 +53,32 @@ if (!process.env.BEHIND_APACHE) {
 
 app.use(express.json());
 
-/**
- * GET /api/bus
- * 次のバス情報を返す
- *
- * レスポンス例:
- * {
- *   "buses": [
- *     { "departureTime": "14:23", "minutesUntil": 5, "route": "八千代中央行き", "isDelayed": false, "isCancelled": false },
- *     ...
- *   ],
- *   "fetchedAt": "2026-05-25T14:18:00.000Z",
- *   "cached": false
- * }
- */
-app.get('/api/bus', async (req, res) => {
-  try {
-    const now = Date.now();
-    const forceRefresh = req.query.refresh === '1';
+// ルート → バス画面へリダイレクト（スタンドアロン確認用。本番は Apache がドメイン直下を別サイトとして扱う）
+app.get('/', (req, res) => res.redirect('/home/bus/'));
 
-    // キャッシュが有効な場合はそのまま返す
-    if (!forceRefresh && cache && now - cacheTimestamp < CACHE_TTL_MS) {
-      console.log('[cache] hit');
-      return res.json({ ...cache, cached: true });
-    }
+// ── HomeUtilities: 機能ごとに server/features/<name>/ ・ server/public/<name>/ で管理 ──
+// 各機能は自分のURL配下に閉じる:
+//   静的UIを持つ機能    → /home/<feature>/          + /home/<feature>/api/*
+//   API のみの機能      → /home/api/<feature>/*
+// 新機能（太陽光発電など）を追加する際は同じパターンで features/ 配下にフォルダを追加する。
 
-    // 既に進行中のスクレイピングがある場合はそれを待つ
-    if (pendingFetch) {
-      console.log('[cache] waiting for pending fetch');
-      const result = await pendingFetch;
-      return res.json({ ...result, cached: true });
-    }
+// BusCheck: /home/bus/*
+app.use('/home/bus', express.static(path.join(publicDir, 'bus')));
+app.use('/home/bus/api', busRouter);
 
-    console.log('[scrape] starting...');
-    pendingFetch = scrapeBusInfo().finally(() => {
-      pendingFetch = null;
-    });
+// CatPoopWatch: /home/api/catwatch/*（Home Control ダッシュボードの1コンポーネント）
+app.use('/home/api/catwatch', catwatchRouter);
 
-    const result = await pendingFetch;
-    cache = result;
-    cacheTimestamp = Date.now();
-
-    console.log(`[scrape] done. ${result.buses.length} buses found.`);
-    res.json({ ...result, cached: false });
-  } catch (err) {
-    console.error('[scrape] error:', err.message);
-
-    // キャッシュが古くても返せるものがあれば返す
-    if (cache) {
-      return res.json({ ...cache, cached: true, error: err.message });
-    }
-
-    res.status(500).json({
-      error: 'スクレイピングに失敗しました',
-      detail: err.message,
-      buses: [],
-    });
-  }
-});
+// Home Control ダッシュボード: /home/control
+app.get('/home/control', (req, res) =>
+  res.sendFile(path.join(publicDir, 'home', 'control.html'))
+);
 
 /**
- * GET /api/health
- * ヘルスチェック用
+ * GET /home/api/health
+ * サーバー全体のヘルスチェック（ゲートウェイのワーカー起動確認にも使用）
  */
-app.get('/api/health', (req, res) => {
+app.get('/home/api/health', (req, res) => {
   const idleSec  = Math.round((Date.now() - lastRequestTime) / 1000);
   const remainSec = Math.max(0, Math.round((IDLE_TIMEOUT_MS - (Date.now() - lastRequestTime)) / 1000));
   res.json({
@@ -153,27 +87,14 @@ app.get('/api/health', (req, res) => {
     uptime: Math.round(process.uptime()) + 's',
     idleSince: idleSec + 's',
     shutdownIn: remainSec + 's',
-    cacheAge: cache ? Math.round((Date.now() - cacheTimestamp) / 1000) + 's' : 'no cache',
   });
 });
 
-/**
- * GET /api/debug
- * ページの生テキストを確認するデバッグ用エンドポイント
- * セレクタ調整が必要な時に使う
- */
-app.get('/api/debug', async (req, res) => {
-  try {
-    const result = await scrapeBusInfo();
-    res.json(result); // debugフィールド含む生データを返す
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.listen(PORT, () => {
-  console.log(`BusCheck server listening on port ${PORT}`);
-  console.log(`  GET /api/bus     - 次のバス一覧`);
-  console.log(`  GET /api/health  - ヘルスチェック`);
-  console.log(`  GET /api/debug   - スクレイピング生データ（調整用）`);
+  console.log(`HomeUtilities server listening on port ${PORT}`);
+  console.log(`  GET  /home/bus/              - BusCheck 画面`);
+  console.log(`  GET  /home/bus/api/bus       - 次のバス一覧`);
+  console.log(`  GET  /home/control           - Home Control ダッシュボード`);
+  console.log(`  GET  /home/api/catwatch/*    - CatPoopWatch API`);
+  console.log(`  GET  /home/api/health        - ヘルスチェック`);
 });

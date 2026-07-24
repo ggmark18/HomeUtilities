@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * BusCheck Gateway
+ * HomeUtilities Gateway
  *
  * ポート3000で常時待機する超軽量プロセス。
- * リクエストが来たらワーカー（server.js）を起動してプロキシし、
+ * リクエストが来たらワーカー（server.js。全機能を内包）を起動してプロキシし、
  * ワーカーは1時間無通信で自動終了する。
  */
 
@@ -67,7 +67,7 @@ function waitUntilWorkerReady() {
         return reject(new Error('ワーカー起動タイムアウト'));
       }
       const req = http.get(
-        `http://127.0.0.1:${WORKER_PORT}/api/health`,
+        `http://127.0.0.1:${WORKER_PORT}/home/api/health`,
         res => {
           res.resume();
           if (res.statusCode === 200) {
@@ -149,6 +149,6 @@ const gateway = http.createServer(async (req, res) => {
 });
 
 gateway.listen(GATEWAY_PORT, () => {
-  console.log(`[gateway] BusCheck gateway 起動 → ポート ${GATEWAY_PORT}`);
+  console.log(`[gateway] HomeUtilities gateway 起動 → ポート ${GATEWAY_PORT}`);
   console.log(`          ワーカーはリクエスト時に自動起動 / 1時間無通信で自動終了`);
 });

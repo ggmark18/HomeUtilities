@@ -72,7 +72,7 @@ AWSコンソール → EC2 → セキュリティグループ → インバウ�
 cd ~/buscheck
 # 常駐させるのはgateway.jsのみ（軽量）
 # server.js（Puppeteer）はリクエスト時に自動起動 → 1時間で自動終了
-pm2 start gateway.js --name buscheck-gateway
+pm2 start gateway.js --name homeutils-gateway
 pm2 startup        # 再起動時の自動起動設定（表示されたコマンドを実行）
 pm2 save           # 設定を保存
 ```
@@ -84,28 +84,30 @@ pm2 save           # 設定を保存
 pm2 status
 
 # バス情報が取得できるか（初回はワーカー起動のため数秒かかる）
-curl http://localhost:3000/api/health
-curl http://localhost:3000/api/bus
+curl http://localhost:3000/home/api/health
+curl http://localhost:3000/home/bus/api/bus
 
 # 外部から確認（ローカルPCで）
-curl http://YOUR_EC2_IP:3000/api/health
+curl http://YOUR_EC2_IP:3000/home/api/health
 ```
 
 ---
 
-## 2. プラグインのIPアドレス設定
+## 2. プラグインの接続先設定
 
-2か所を EC2のIPに変更してください:
+`plugin/src/main.ts` はソースコードに URL を直書きせず、`import.meta.env.VITE_API_BASE` を参照します。接続先の変更は以下の `.env` ファイルで行ってください（詳細は `DEVELOP.md` 参照）。
 
-**`plugin/src/main.ts` の1行目:**
-```typescript
-const API_BASE = 'http://YOUR_EC2_IP:3000';  // ← 変更
+**`plugin/.env`（ベース値・本番用）:**
+```env
+VITE_API_BASE=https://YOUR_DOMAIN/home/bus
+VITE_AUTH_USER=YOUR_USERNAME
+VITE_AUTH_PASS=YOUR_PASSWORD
 ```
 
 **`plugin/app.json` のwhitelist:**
 ```json
 "whitelist": [
-  "http://YOUR_EC2_IP:3000"   // ← 変更
+  "https://YOUR_DOMAIN"   // ← 変更
 ]
 ```
 
@@ -158,22 +160,22 @@ npm run pack         # buscheck.ehpk が生成される
 
 ## 5. スクレイパーのデバッグ・調整
 
-初回デプロイ後、バス情報が正しく取れない場合は `/api/debug` で生データを確認します:
+初回デプロイ後、バス情報が正しく取れない場合は `/home/bus/api/debug` で生データを確認します:
 
 ```bash
-curl http://YOUR_EC2_IP:3000/api/debug | python3 -m json.tool
+curl http://YOUR_EC2_IP:3000/home/bus/api/debug | python3 -m json.tool
 ```
 
 `debug.bodyPreview` に東洋バスサイトのテキストが入っているはずです。
-セレクタが合っていない場合は `scraper.js` の `selectors` 配列を調整してください。
+セレクタが合っていない場合は `server/features/bus/scraper.js` の `page.evaluate` 内のセレクタを調整してください。
 
 ---
 
 ## 6. PM2 管理コマンド
 
 ```bash
-pm2 logs buscheck      # ログ確認
-pm2 restart buscheck   # 再起動
-pm2 stop buscheck      # 停止
-pm2 delete buscheck    # 削除
+pm2 logs homeutils-gateway      # ログ確認
+pm2 restart homeutils-gateway   # 再起動
+pm2 stop homeutils-gateway      # 停止
+pm2 delete homeutils-gateway    # 削除
 ```

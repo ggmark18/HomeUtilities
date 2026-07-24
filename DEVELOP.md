@@ -1,4 +1,4 @@
-# BusCheck 開発ガイド
+# HomeUtilities 開発ガイド
 
 ローカル環境での開発・動作確認手順をまとめます。
 
@@ -26,28 +26,30 @@ evenhub --version
 
 | ファイル | コミット | 用途 |
 |---|---|---|
-| `plugin/.env` | ✅ | プラグイン開発デフォルト（localhost・認証なし） |
-| `plugin/.env.production.local` | ❌ | プラグイン本番値（実際のURL・認証情報） |
+| `plugin/.env` | ✅ | Vite が全モードで読み込むベース値。現状は本番URL・認証情報が入っている |
+| `plugin/.env.development` | ✅ | `npm run dev` 実行時に `.env` を上書きする開発用デフォルト（localhost・認証なし） |
 | `server/.env.example` | ✅ | サーバー設定テンプレート |
 | `server/.env` | ❌ | サーバー実際の値（ローカル・EC2それぞれに配置） |
 
+> ⚠️ `plugin/.env` は Git にコミットされていますが、実際の本番パスワードが入っています。`.gitignore` の想定（`.env.*.local` のみ除外）と噛み合っていないため、認証情報を扱う場合は `plugin/.env.production.local` のような `.local` サフィックス付きファイルに移し、`plugin/.env` 側はプレースホルダーにすることを検討してください。
+
 ### プラグイン（Vite）
 
-`plugin/.env`（開発用・コミット済み）:
+`plugin/.env.development`（開発用・コミット済み）:
 ```env
-VITE_API_BASE=http://localhost:3000
+VITE_API_BASE=http://localhost:3000/home/bus
 VITE_AUTH_USER=
 VITE_AUTH_PASS=
 ```
 
-`plugin/.env.production.local`（本番用・gitignore対象）:
+`plugin/.env`（ベース値。現状は本番URL・認証情報）:
 ```env
-VITE_API_BASE=https://YOUR_DOMAIN/bus
+VITE_API_BASE=https://www.cetacea.jp/home/bus
 VITE_AUTH_USER=YOUR_USERNAME
 VITE_AUTH_PASS=YOUR_PASSWORD
 ```
 
-`npm run dev` は `.env`（開発用）を、`npm run build` は `.env.production.local`（本番用）を自動的に読み込みます。
+Vite は `npm run dev`（development モード）実行時に `.env` → `.env.development` の順で読み込み、後者が同名キーを上書きします。`npm run build`（production モード）は `.env` のみを読み込むため、`.env` の値がそのままビルドに使われます。
 
 ### Web画面（index.html）
 
@@ -57,7 +59,7 @@ AUTH_USER=
 AUTH_PASS=
 ```
 
-サーバーが起動時に `.env` を読み込み、`/config.js` エンドポイントで認証情報を動的生成します。`index.html` はこの `config.js` を読み込むため、ソースコードの変更は不要です。
+サーバーが起動時に `.env` を読み込み、`GET /home/bus/api/config` エンドポイントで認証情報を動的生成します。`index.html` はこれを `fetch` で取得するため、ソースコードの変更は不要です。
 
 EC2本番環境では `server/.env.example` をコピーして値を設定します：
 ```bash
@@ -78,14 +80,17 @@ node server.js
 
 起動確認：
 ```bash
-# ヘルスチェック
-curl http://localhost:3000/api/health
+# ヘルスチェック（機能共通）
+curl http://localhost:3000/home/api/health
 
 # バス情報の取得（スクレイピングが走るため数秒かかる）
-curl http://localhost:3000/api/bus | python3 -m json.tool
+curl http://localhost:3000/home/bus/api/bus | python3 -m json.tool
 
 # スクレイピング生データの確認（セレクタ調整時に使用）
-curl http://localhost:3000/api/debug | python3 -m json.tool
+curl http://localhost:3000/home/bus/api/debug | python3 -m json.tool
+
+# 猫トイレ監視の状態確認
+curl http://localhost:3000/home/api/catwatch/status
 ```
 
 > `server.js` を直接起動するとポート3000で動作します（gateway不要）。  
@@ -128,7 +133,8 @@ npx evenhub-simulator
 サーバーが起動している状態でブラウザからアクセス：
 
 ```
-http://localhost:3000
+http://localhost:3000/home/bus/     # BusCheck
+http://localhost:3000/home/control  # Home Control ダッシュボード
 ```
 
 `server/.env` の `AUTH_USER` が空の場合、認証ヘッダーなしで動作します。
@@ -163,21 +169,25 @@ npm run pack
 
 | エンドポイント | 説明 |
 |---|---|
-| `GET /` | Web画面（index.html） |
-| `GET /config.js` | 認証設定（環境変数から動的生成） |
-| `GET /api/bus` | 次のバス一覧（60秒キャッシュ） |
-| `GET /api/bus?refresh=1` | 強制再取得（キャッシュ無視） |
-| `GET /api/health` | サーバー状態確認 |
-| `GET /api/debug` | スクレイピング生データ（セレクタ調整用） |
+| `GET /home/bus/` | BusCheck Web画面（index.html） |
+| `GET /home/bus/api/config` | 認証設定（環境変数から動的生成） |
+| `GET /home/bus/api/bus` | 次のバス一覧（60秒キャッシュ） |
+| `GET /home/bus/api/bus?refresh=1` | 強制再取得（キャッシュ無視） |
+| `GET /home/bus/api/debug` | スクレイピング生データ（セレクタ調整用） |
+| `GET /home/control` | Home Control ダッシュボード（control.html） |
+| `POST /home/api/catwatch/event` | OrangePi からのイベント受信（Bearer認証） |
+| `GET /home/api/catwatch/status` | 猫トイレ監視の現在状態 |
+| `GET /home/api/catwatch/stream` | SSE リアルタイムストリーム |
+| `GET /home/api/health` | サーバー全体の状態確認（機能共通） |
 
 ---
 
 ## 6. スクレイパーの調整
 
-バス情報が正しく取れない場合は `/api/debug` で HTML 構造を確認します：
+バス情報が正しく取れない場合は `/home/bus/api/debug` で HTML 構造を確認します：
 
 ```bash
-curl http://localhost:3000/api/debug | python3 -m json.tool
+curl http://localhost:3000/home/bus/api/debug | python3 -m json.tool
 ```
 
 確認ポイント：
@@ -189,17 +199,19 @@ curl http://localhost:3000/api/debug | python3 -m json.tool
 | `debug.bodyPreview` | ページ全体のテキスト先頭500文字 |
 | `buses` | 最終的に整形されたバスデータ |
 
-`buses` が空の場合は `server/scraper.js` の `page.evaluate` 内のセレクタを調整してください。
+`buses` が空の場合は `server/features/bus/scraper.js` の `page.evaluate` 内のセレクタを調整してください。
 
 ---
 
 ## 7. ファイル構成と役割
 
+各機能は `server/features/<feature>/`（サーバーロジック）と `server/public/<feature>/`（静的UI）に対称的に分離されています。新機能を追加する際はこのパターンに従ってください（詳細は README.md の「新機能の追加方法」を参照）。
+
 ```
-BusCheck/
+HomeUtilities/
 ├── plugin/
-│   ├── .env                   # 開発デフォルト（コミット済み）
-│   ├── .env.production.local  # 本番値（gitignore対象・各自で作成）
+│   ├── .env                   # ベース値（コミット済み・現状は本番URL/認証情報）
+│   ├── .env.development       # 開発用デフォルト（コミット済み・npm run dev で .env を上書き）
 │   ├── src/
 │   │   └── main.ts            # Even Hub プラグイン本体
 │   │                          # import.meta.env で環境変数を参照
@@ -207,12 +219,19 @@ BusCheck/
 └── server/
     ├── .env                   # 実際の値（gitignore対象）
     ├── .env.example           # 設定テンプレート（コミット済み）
-    ├── gateway.js             # 常駐プロセス（本番用・ポート3000）
-    ├── server.js              # Express サーバー（ポート3001 or 3000）
-    │                          # dotenv で .env を読み込み
-    │                          # /config.js で認証情報を動的提供
-    ├── scraper.js             # Puppeteer スクレイパー
+    ├── gateway.js             # 常駐プロセス（本番用・ポート3000）。ワーカー（server.js）を起動
+    ├── server.js              # ワーカー本体（ポート3001 or 3000）
+    │                          # dotenv で .env を読み込み、各 features/ のルーターをマウントする薄いブートストラップ
+    ├── features/
+    │   ├── bus/
+    │   │   ├── routes.js      # BusCheck API（/home/bus/api/*）。/config・/bus・/debug
+    │   │   └── scraper.js     # Puppeteer スクレイパー
+    │   └── catwatch/
+    │       └── routes.js      # CatPoopWatch API（/home/api/catwatch/*）。SSE・Webhook受信
     └── public/
-        └── index.html         # スマートフォン用Web画面
-                               # <script src="config.js"> で認証情報を取得
+        ├── bus/
+        │   └── index.html     # スマートフォン用Web画面（/home/bus/）
+        │                      # fetch('api/config') で認証情報を取得
+        └── home/
+            └── control.html   # Home Control ダッシュボード（/home/control）
 ```

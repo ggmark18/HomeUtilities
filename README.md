@@ -16,7 +16,7 @@
         ↓ SSE
 【ブラウザ / Even G2 グラス / スマートフォン】
   www.cetacea.jp/home/control  ─ ホームダッシュボード
-  www.cetacea.jp/bus/          ─ バス運行情報
+  www.cetacea.jp/home/bus/     ─ バス運行情報
 ```
 
 ---
@@ -25,29 +25,37 @@
 
 | 機能 | 説明 | アクセス先 |
 |---|---|---|
-| **BusCheck** | 東洋バス運行情報（Even G2 / Web） | `/bus/` |
+| **BusCheck** | 東洋バス運行情報（Even G2 / Web） | `/home/bus/` |
 | **CatPoopWatch** | 猫トイレ監視・LINE通知 | OrangePi 常駐 |
 | **Home Control** | ホームダッシュボード（猫トイレ状態） | `/home/control` |
+
+新しい自宅状態レポート機能（太陽光発電など）を追加する際は、下記「リポジトリ構成」のパターンに従って `server/features/<feature>/` を追加してください。
 
 ---
 
 ## リポジトリ構成
 
+各機能は `server/features/<feature>/`（ロジック）と、静的UIを持つ機能は `server/public/<feature>/` にも対称的に分離されています。
+
 ```
-BusCheck/
-├── plugin/                   # Even Hub プラグイン（Vite + TypeScript）
+HomeUtilities/
+├── plugin/                     # Even Hub プラグイン（Vite + TypeScript）
 │   ├── src/main.ts
 │   └── app.json
-└── server/                   # EC2 Node.js サーバー
-    ├── gateway.js            # 常駐プロセス（ポート3000）
-    ├── server.js             # Puppeteer ワーカー（ポート3001）
-    ├── scraper.js            # 東洋バスサイトスクレイパー
-    ├── routes/
-    │   └── catwatch.js       # CatPoopWatch API（SSE・Webhook受信）
+└── server/                     # EC2 Node.js サーバー
+    ├── gateway.js               # 常駐プロセス（ポート3000）。全機能を内包するワーカーを起動
+    ├── server.js                # ワーカー本体（ポート3001）。各 features/ のルーターをマウントする薄いブートストラップ
+    ├── features/
+    │   ├── bus/
+    │   │   ├── routes.js        # BusCheck API（/home/bus/api/*）
+    │   │   └── scraper.js       # 東洋バスサイトスクレイパー
+    │   └── catwatch/
+    │       └── routes.js        # CatPoopWatch API（/home/api/catwatch/*。SSE・Webhook受信）
     └── public/
-        ├── index.html        # バス情報 Web 画面
+        ├── bus/
+        │   └── index.html       # バス情報 Web 画面（/home/bus/）
         └── home/
-            └── control.html  # ホームダッシュボード
+            └── control.html     # ホームダッシュボード（/home/control）
 
 CatPoopWatch/                 # OrangePi 上で動作
     ├── poop_detector.py      # カメラ監視・糞検知
@@ -75,9 +83,9 @@ CatPoopWatch/                 # OrangePi 上で動作
 
 | エンドポイント | 説明 |
 |---|---|
-| `GET /bus/api/bus` | 次のバス一覧 |
-| `GET /bus/api/health` | ヘルスチェック |
-| `GET /bus/api/debug` | スクレイピング生データ（調整用） |
+| `GET /home/bus/api/bus` | 次のバス一覧 |
+| `GET /home/bus/api/debug` | スクレイピング生データ（調整用） |
+| `GET /home/api/health` | サーバー全体のヘルスチェック（機能共通） |
 
 ### EC2 セットアップ
 
@@ -101,9 +109,11 @@ pm2 startup && pm2 save
 
 ### Apache 設定（BusCheck）
 
+> **既存のEC2環境からの移行時のみ:** 旧構成（`Alias /bus`, `ProxyPass /bus/api/`）を使っている場合、本設定に置き換えた上で `pm2 restart homeutils-gateway` してください。`/bus/api/` 系のルールは `/home/api/` 系より前（より具体的な位置）に書く必要があります。
+
 ```apache
 # Basic 認証
-<Location /bus/>
+<Location /home/bus/>
     AuthType Basic
     AuthName "BusCheck"
     AuthUserFile /etc/apache2/.htpasswd
@@ -113,14 +123,14 @@ pm2 startup && pm2 save
 </Location>
 
 # 静的ファイル
-Alias /bus /home/homeutils/server/public
-<Directory /home/homeutils/server/public>
+Alias /home/bus /home/homeutils/server/public/bus
+<Directory /home/homeutils/server/public/bus>
     Require all granted
 </Directory>
 
-# API プロキシ
-ProxyPass        /bus/api/ http://localhost:3000/api/
-ProxyPassReverse /bus/api/ http://localhost:3000/api/
+# API プロキシ（プレフィックスを剥がさず、そのまま /home/bus/api/ で転送）
+ProxyPass        /home/bus/api/ http://localhost:3000/home/bus/api/
+ProxyPassReverse /home/bus/api/ http://localhost:3000/home/bus/api/
 ```
 
 ### Even Hub プラグイン ビルド
@@ -332,6 +342,21 @@ CATWATCH_SECRET=your_secret_token  # OrangePi の .env と同じ値
 
 ---
 
+## 4. 新機能の追加方法（太陽光発電など）
+
+自宅の状態をレポート・制御する新機能は、以下のパターンで `server/features/<feature>/` に追加します。
+
+1. `server/features/<feature>/routes.js` に Express の `Router` を作成し、必要なロジック（センサー取得・API呼び出しなど）を同じフォルダ内に置く（例: `scraper.js`, `client.js`）。
+2. 専用の Web 画面が必要な場合は `server/public/<feature>/index.html` を作成する。
+3. `server/server.js` で以下のいずれかのパターンでマウントする。
+   - **専用画面を持つ機能**（BusCheck 方式）: `/home/<feature>/` に静的UI、`/home/<feature>/api/*` にAPI
+   - **Home Control ダッシュボードに組み込む機能**（CatPoopWatch 方式）: `/home/api/<feature>/*` にAPIのみを生やし、`control.html` にカードを追加
+4. Apache 側にも対応するルール（`Alias` / `ProxyPass`）を追加する（本番のみ・手動作業）。
+
+太陽光発電の状態表示は、既存の `control.html` に新しいカードを追加する形（Home Control ダッシュボード方式）が想定されています。
+
+---
+
 ## 共通デバッグコマンド
 
 ```bash
@@ -340,7 +365,8 @@ pm2 logs homeutils-gateway
 pm2 restart homeutils-gateway
 
 # バス API 確認
-curl -u USER:PASS https://www.cetacea.jp/bus/api/health
+curl -u USER:PASS https://www.cetacea.jp/home/bus/api/bus
+curl https://www.cetacea.jp/home/api/health
 
 # CatPoopWatch 状態確認
 curl https://www.cetacea.jp/home/api/catwatch/status
