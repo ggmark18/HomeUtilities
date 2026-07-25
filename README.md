@@ -222,6 +222,42 @@ BEHIND_APACHE=true
 CATWATCH_SECRET=your_secret_token  # OrangePi の .env と同じ値
 ```
 
+### CATWATCH_SECRET の設定手順
+
+OrangePi → EC2 の Webhook（`POST /home/api/catwatch/event`）を認証するための共有シークレット。**EC2側とOrangePi側で全く同じ値**にする必要があり、片方だけ設定/変更すると OrangePi からのイベントが全て `401 Unauthorized` になり、ダッシュボードが「OrangePi: 未受信」のままになる。
+
+1. ランダムなシークレットを1つ生成する。
+   ```bash
+   openssl rand -hex 32
+   ```
+2. **EC2側**: `server/.env`（`server/.env.example` をコピーして作成、Git管理外）に設定する。
+   ```
+   CATWATCH_SECRET=<生成した値>
+   ```
+   反映のためワーカーを再起動する。
+   ```bash
+   pm2 restart homeutils-gateway
+   ```
+3. **OrangePi側**: `~/CatPoopWatch/.env` に**同じ値**を設定する。
+   ```
+   CATWATCH_WEBHOOK_URL=https://www.cetacea.jp/home/api/catwatch/event
+   CATWATCH_SECRET=<EC2と同じ値>
+   ```
+   反映のためサービスを再起動する。
+   ```bash
+   ssh mark@192.168.1.7 "sudo systemctl restart poop-detector cleaner-control"
+   ```
+4. EC2側で直接叩いて認証が通ることを確認する。
+   ```bash
+   curl -i -X POST https://www.cetacea.jp/home/api/catwatch/event \
+     -H "Authorization: Bearer <EC2の.envに設定した値>" \
+     -H "Content-Type: application/json" \
+     -d '{"type":"heartbeat"}'
+   ```
+   `{"ok":true}` が返り、ダッシュボードの「OrangePi」表示が緑（生存中）に変われば設定は正しい。`401 Unauthorized` が返る場合は EC2側の値が未設定・不一致。
+
+> **注意:** `CATWATCH_SECRET` が未設定の場合、`authenticate` ミドルウェアは認証をスキップする（`server/features/catwatch/routes.js:25`、開発用の抜け道）。本番では必ず設定すること。
+
 ---
 
 ## 4. 新機能の追加方法（太陽光発電など）
