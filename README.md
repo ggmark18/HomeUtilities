@@ -157,36 +157,19 @@ npm run pack    # buscheck.ehpk を生成
 
 ## 2. CatPoopWatch
 
-ATOM Cam で猫トイレを監視し、糞を検知したら LINE に通知するシステム。OrangePi 上で常駐動作する。
+猫トイレ監視・LINE通知の検知ロジックや OrangePi 上のセットアップは別リポジトリ [CatPoopWatch](../CatPoopWatch) で管理する。ここでは HomeUtilities 側が受け持つ、監視結果の受信・ダッシュボード表示部分のみ記載する。
 
 ### システム構成
 
 ```
-ATOM Cam (RTSP: 192.168.1.21:8554)
-    ↓ ffmpeg（20秒ごとにスナップショット取得）
-poop_detector.py（背景差分で糞を検知）
-    ↓ MQTT (192.168.1.7:1883)
-cleaner_control.py（LINE 通知 + DEEBOT 停止試行）
+OrangePi（CatPoopWatch: poop_detector.py / cleaner_control.py）
     ↓ HTTP POST Webhook
-EC2 Node.js（ダッシュボードへ状態反映）
+EC2 Node.js（HomeUtilities: /home/api/catwatch/*）
+    ↓ SSE
+Home Control ダッシュボード
 ```
 
-### 検知ロジック
-
-1. 20秒ごとに ATOM Cam から静止画を取得
-2. ROI（猫トイレ領域）を切り出して背景差分を計算
-3. 3回連続で差分を検知したら「確定」→ アラート発火
-4. 糞を取り除くと3回連続クリーン検知で自動リセット
-5. 1時間ごとに背景画像を自動更新（アラート未検出時のみ）
-
-### MQTT トピック
-
-| トピック | 方向 | 内容 |
-|---|---|---|
-| `alert/cat_poop` | detector → control | 糞検知アラート |
-| `control/cat_poop_reset` | control → detector | 清掃完了・リセット |
-
-### Webhook イベント（EC2 へ送信）
+### Webhook イベント（EC2 が受信）
 
 | イベント | タイミング |
 |---|---|
@@ -194,115 +177,9 @@ EC2 Node.js（ダッシュボードへ状態反映）
 | `cleanup_detected` | 清掃完了自動検知時 |
 | `heartbeat` | 20秒ごと（死活監視） |
 
-### 前提条件（OrangePi）
+### 認証
 
-- Mosquitto インストール・起動済み
-- `ffmpeg` インストール済み
-- ATOM Cam に atomcam_tools インストール済み・RTSP 有効化済み
-- Python 3.11 以上
-
-### OrangePi セットアップ
-
-```bash
-cd ~/CatPoopWatch
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-`.env` ファイルを作成:
-
-```
-LINE_CHANNEL_TOKEN=your_line_channel_token
-ECOVACS_ACCOUNT=your_ecovacs_email
-ECOVACS_PASSWORD=your_ecovacs_password
-CATWATCH_WEBHOOK_URL=https://www.cetacea.jp/home/api/catwatch/event
-CATWATCH_SECRET=your_secret_token
-```
-
-### デプロイ（Mac → OrangePi）
-
-```bash
-# 初回・更新時
-rsync -av --exclude='venv' --exclude='__pycache__' \
-  ~/Develop/CatPoopWatch/ mark@192.168.1.7:~/CatPoopWatch/
-
-# サービス再起動
-ssh mark@192.168.1.7 "sudo systemctl restart poop-detector cleaner-control"
-```
-
-### systemd サービス登録
-
-```bash
-sudo nano /etc/systemd/system/poop-detector.service
-```
-
-```ini
-[Unit]
-Description=Cat Poop Detector
-After=network.target mosquitto.service
-
-[Service]
-User=mark
-WorkingDirectory=/home/mark/CatPoopWatch
-EnvironmentFile=/home/mark/CatPoopWatch/.env
-ExecStart=/home/mark/CatPoopWatch/venv/bin/python poop_detector.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo nano /etc/systemd/system/cleaner-control.service
-```
-
-```ini
-[Unit]
-Description=Cat Poop Cleaner Control
-After=network.target mosquitto.service
-
-[Service]
-User=mark
-WorkingDirectory=/home/mark/CatPoopWatch
-EnvironmentFile=/home/mark/CatPoopWatch/.env
-ExecStart=/home/mark/CatPoopWatch/venv/bin/python cleaner_control.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable poop-detector cleaner-control
-sudo systemctl start poop-detector cleaner-control
-```
-
-### ログ確認
-
-```bash
-sudo journalctl -u poop-detector -f
-sudo journalctl -u cleaner-control -f
-```
-
-### 手動テスト（MQTT アラート送信）
-
-```bash
-mosquitto_pub -h 192.168.1.7 -p 1883 -t "alert/cat_poop" -m "detected"
-```
-
-### DEEBOT 自動制御について
-
-> **2026年7月時点で、日本では ECOVACS API による DEEBOT 制御は不可能。** 以下の手段をすべて試みたが失敗：
-> - `get_ecovacs_token.py`: メール送信 API がエラー（code 0002）
-> - `sucks` ライブラリ: Pearl は XMPP 非対応
-> - `deebot-client 3.0.2`: アプリバージョン古すぎ（code 1013）
-> - `deebot-client 6.0.2`: `/user/login` エンドポイントが日本で封鎖
->
-> 糞検知時の LINE 通知は正常に動作するため、DEEBOT の停止は ECOVACS HOME アプリから手動で行うこと。日本で API が開放された際に備え、DEEBOT 制御コードはそのまま残してある。
+OrangePi からの `POST /home/api/catwatch/event` は `CATWATCH_SECRET` による Bearer 認証で保護されている。OrangePi 側（CatPoopWatch リポジトリの `.env`）の `CATWATCH_WEBHOOK_URL` / `CATWATCH_SECRET` と、EC2 側 `server/.env` の `CATWATCH_SECRET` が一致している必要がある。
 
 ---
 
@@ -320,10 +197,15 @@ mosquitto_pub -h 192.168.1.7 -p 1883 -t "alert/cat_poop" -m "detected"
 
 ### Apache 設定（Home Control）
 
+> **既存環境で `/home/control` が 404 になる場合:** `Alias /home` は静的ファイルへの直接マッピングのため、拡張子なしの `/home/control` は `server/public/home/control.html` に一致せず Apache が直接 404 を返してしまいます（Node には届いていません）。下記のように `/home/control` 専用の `ProxyPass` を追加し、Node の `app.get('/home/control', ...)` に転送してください。`/home/control` は `/home` より長く具体的なパスなので、`Alias /home` より優先されます。
+
 ```apache
 # Home Control（認証なし・家族向け）
 ProxyPass        /home/api/ http://localhost:3000/home/api/
 ProxyPassReverse /home/api/ http://localhost:3000/home/api/
+
+ProxyPass        /home/control http://localhost:3000/home/control
+ProxyPassReverse /home/control http://localhost:3000/home/control
 
 Alias /home /home/homeutils/server/public/home
 <Directory /home/homeutils/server/public/home>
