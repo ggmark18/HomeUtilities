@@ -15,7 +15,7 @@
   Node.js (HomeUtilities サーバー)
         ↓ SSE
 【ブラウザ / Even G2 グラス / スマートフォン】
-  www.cetacea.jp/home/control  ─ ホームダッシュボード
+  www.cetacea.jp/home/control/ ─ ホームダッシュボード
   www.cetacea.jp/home/bus/     ─ バス運行情報
 ```
 
@@ -27,7 +27,7 @@
 |---|---|---|
 | **BusCheck** | 東洋バス運行情報（Even G2 / Web） | `/home/bus/` |
 | **CatPoopWatch** | 猫トイレ監視・LINE通知 | OrangePi 常駐 |
-| **Home Control** | ホームダッシュボード（猫トイレ状態） | `/home/control` |
+| **Home Control** | ホームダッシュボード（猫トイレ状態） | `/home/control/` |
 
 新しい自宅状態レポート機能（太陽光発電など）を追加する際は、下記「リポジトリ構成」のパターンに従って `server/features/<feature>/` を追加してください。
 
@@ -55,7 +55,7 @@ HomeUtilities/
         ├── bus/
         │   └── index.html       # バス情報 Web 画面（/home/bus/）
         └── home/
-            └── control.html     # ホームダッシュボード（/home/control）
+            └── index.html       # ホームダッシュボード（/home/control/）
 
 CatPoopWatch/                 # OrangePi 上で動作
     ├── poop_detector.py      # カメラ監視・糞検知
@@ -197,21 +197,21 @@ OrangePi からの `POST /home/api/catwatch/event` は `CATWATCH_SECRET` によ�
 
 ### Apache 設定（Home Control）
 
-> **既存環境で `/home/control` が 404 になる場合:** `Alias /home` は静的ファイルへの直接マッピングのため、拡張子なしの `/home/control` は `server/public/home/control.html` に一致せず Apache が直接 404 を返してしまいます（Node には届いていません）。下記のように `/home/control` 専用の `ProxyPass` を追加し、Node の `app.get('/home/control', ...)` に転送してください。`/home/control` は `/home` より長く具体的なパスなので、`Alias /home` より優先されます。
+BusCheck（`/home/bus`）と全く同じ形にしてあります。`/home/control` を静的ディレクトリとして直接 `Alias` するため、Node を経由しない分レイテンシも小さく、`Alias /home` のような広いパスとの前後関係を気にする必要もありません（BusCheck 同様、ページ本体は静的配信、API のみ Node にプロキシ）。
 
 ```apache
-# Home Control（認証なし・家族向け）
-ProxyPass        /home/api/ http://localhost:3000/home/api/
-ProxyPassReverse /home/api/ http://localhost:3000/home/api/
-
-ProxyPass        /home/control http://localhost:3000/home/control
-ProxyPassReverse /home/control http://localhost:3000/home/control
-
-Alias /home /home/homeutils/server/public/home
+# 静的ファイル（BusCheckと同じパターン）
+Alias /home/control /home/homeutils/server/public/home
 <Directory /home/homeutils/server/public/home>
     Require all granted
 </Directory>
+
+# API プロキシ（catwatch。BusCheckのapiプロキシと対称）
+ProxyPass        /home/api/ http://localhost:3000/home/api/
+ProxyPassReverse /home/api/ http://localhost:3000/home/api/
 ```
+
+> **旧構成（`Alias /home` + `ProxyPass /home/control`）からの移行時:** 上記に置き換えた上で `sudo apachectl configtest && sudo systemctl reload apache2` してください。`Alias /home`（汎用）はもう不要です。
 
 ### EC2 環境変数（`server/.env`）
 
@@ -268,10 +268,10 @@ OrangePi → EC2 の Webhook（`POST /home/api/catwatch/event`）を認証する
 2. 専用の Web 画面が必要な場合は `server/public/<feature>/index.html` を作成する。
 3. `server/server.js` で以下のいずれかのパターンでマウントする。
    - **専用画面を持つ機能**（BusCheck 方式）: `/home/<feature>/` に静的UI、`/home/<feature>/api/*` にAPI
-   - **Home Control ダッシュボードに組み込む機能**（CatPoopWatch 方式）: `/home/api/<feature>/*` にAPIのみを生やし、`control.html` にカードを追加
+   - **Home Control ダッシュボードに組み込む機能**（CatPoopWatch 方式）: `/home/api/<feature>/*` にAPIのみを生やし、`server/public/home/index.html` にカードを追加
 4. Apache 側にも対応するルール（`Alias` / `ProxyPass`）を追加する（本番のみ・手動作業）。
 
-太陽光発電の状態表示は、既存の `control.html` に新しいカードを追加する形（Home Control ダッシュボード方式）が想定されています。
+太陽光発電の状態表示は、既存の `server/public/home/index.html` に新しいカードを追加する形（Home Control ダッシュボード方式）が想定されています。
 
 ---
 

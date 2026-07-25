@@ -69,10 +69,8 @@ app.use('/home/bus/api', busRouter);
 // CatPoopWatch: /home/api/catwatch/*（Home Control ダッシュボードの1コンポーネント）
 app.use('/home/api/catwatch', catwatchRouter);
 
-// Home Control ダッシュボード: /home/control
-app.get('/home/control', (req, res) =>
-  res.sendFile(path.join(publicDir, 'home', 'control.html'))
-);
+// Home Control ダッシュボード: /home/control/*
+app.use('/home/control', express.static(path.join(publicDir, 'home')));
 
 /**
  * GET /home/api/health

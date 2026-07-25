@@ -134,7 +134,7 @@ npx evenhub-simulator
 
 ```
 http://localhost:3000/home/bus/     # BusCheck
-http://localhost:3000/home/control  # Home Control ダッシュボード
+http://localhost:3000/home/control/ # Home Control ダッシュボード
 ```
 
 `server/.env` の `AUTH_USER` が空の場合、認証ヘッダーなしで動作します。
@@ -174,7 +174,7 @@ npm run pack
 | `GET /home/bus/api/bus` | 次のバス一覧（60秒キャッシュ） |
 | `GET /home/bus/api/bus?refresh=1` | 強制再取得（キャッシュ無視） |
 | `GET /home/bus/api/debug` | スクレイピング生データ（セレクタ調整用） |
-| `GET /home/control` | Home Control ダッシュボード（control.html） |
+| `GET /home/control/` | Home Control ダッシュボード（index.html） |
 | `POST /home/api/catwatch/event` | OrangePi からのイベント受信（Bearer認証） |
 | `GET /home/api/catwatch/status` | 猫トイレ監視の現在状態 |
 | `GET /home/api/catwatch/stream` | SSE リアルタイムストリーム |
@@ -233,5 +233,5 @@ HomeUtilities/
         │   └── index.html     # スマートフォン用Web画面（/home/bus/）
         │                      # fetch('api/config') で認証情報を取得
         └── home/
-            └── control.html   # Home Control ダッシュボード（/home/control）
+            └── index.html     # Home Control ダッシュボード（/home/control/）
 ```
