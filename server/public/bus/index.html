@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <!-- iOSホーム画面アプリ: このタグが無いページに遷移するとSafariのブラウザUIが復帰してしまうため、
+       /home/bus/ ・ /home/control/ どちらにも同じ設定を入れて揃える -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Home Utilities">
   <title>BusCheck</title>
   <link rel="icon" href="https://toyo-bus.bus-navigation.jp/wgsys/img/favicon.ico">
   <style>
