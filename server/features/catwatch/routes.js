@@ -33,7 +33,7 @@ function authenticate(req, res, next) {
 
 // ========= OrangePi からのイベント受信 =========
 // POST /home/api/catwatch/event
-// body: { type: 'detection_alert' | 'cleanup_detected' | 'heartbeat' }
+// body: { type: 'detection_alert' | 'cleanup_detected' | 'heartbeat' | 'startup_reset' }
 router.post('/event', authenticate, (req, res) => {
   const { type } = req.body;
   const timestamp = Math.floor(Date.now() / 1000);
@@ -59,8 +59,32 @@ router.post('/event', authenticate, (req, res) => {
     return res.json({ ok: true });
   }
 
+  // poop_detector.py起動直後に1回だけ送る。プロセス内の検知状態（alerted等）は
+  // 再起動のたびに失われるため、ダッシュボードもそれに合わせて明示的に同期する。
+  if (type === 'startup_reset') {
+    state.detection = 'clean';
+    state.lastEvent = { type, timestamp };
+    broadcastSSE({ type, timestamp, detection: 'clean' });
+    return res.json({ ok: true });
+  }
+
   console.warn(`[catwatch] 不明なevent type: ${type}`);
   res.status(400).json({ error: 'unknown event type' });
+});
+
+// ========= 手動リセット（ダッシュボードから） =========
+// OrangePi再起動時にプロセス内の検知状態が失われ、ダッシュボードが
+// 「検知」のまま固定されてしまうケースの救済用。実際に清掃済みであることを
+// 確認したうえで家族が手動で押す想定のため、OrangePi向けのBearer認証は不要。
+// POST /home/api/catwatch/reset
+router.post('/reset', (req, res) => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  console.log(`[catwatch] 手動リセット from=${req.ip}`);
+
+  state.detection = 'clean';
+  state.lastEvent = { type: 'manual_reset', timestamp };
+  broadcastSSE({ type: 'manual_reset', timestamp, detection: 'clean' });
+  res.json({ ok: true });
 });
 
 // ========= 現在の状態取得 =========

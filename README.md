@@ -176,6 +176,7 @@ Home Control ダッシュボード
 | `detection_alert` | 糞検知確定時 |
 | `cleanup_detected` | 清掃完了自動検知時 |
 | `heartbeat` | 20秒ごと（死活監視） |
+| `startup_reset` | プロセス起動直後に1回（再起動でプロセス内の検知状態が失われるため、ダッシュボードを明示的に同期） |
 
 ### 認証
 

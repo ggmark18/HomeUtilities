@@ -76,6 +76,21 @@
     .heartbeat-dot.alive { background: #4caf50; }
     .heartbeat-dot.stale { background: #f44336; }
 
+    .reset-btn {
+      margin-top: 16px;
+      width: 100%;
+      background: transparent;
+      color: #888;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .reset-btn:hover { color: #ccc; border-color: #555; }
+    .reset-btn:disabled { opacity: 0.5; cursor: default; }
+
     .footer {
       margin-top: 24px;
       font-size: 0.7rem;
@@ -180,6 +195,7 @@
       </div>
       <div id="last-event-label"></div>
     </div>
+    <button class="reset-btn" id="reset-btn">🔄 表示を「きれい」にリセット</button>
   </div>
 
   <div class="footer" id="footer"></div>
@@ -240,10 +256,32 @@
       }
 
       if (lastEvent) {
-        const typeLabel = lastEvent.type === 'detection_alert' ? '検知' : '清掃完了';
+        const typeLabels = {
+          detection_alert: '検知',
+          cleanup_detected: '清掃完了',
+          manual_reset: '手動リセット',
+          startup_reset: 'OrangePi再起動',
+        };
+        const typeLabel = typeLabels[lastEvent.type] || lastEvent.type;
         eventLabel.textContent = `最終イベント: ${typeLabel} (${formatTime(lastEvent.timestamp)})`;
       }
     }
+
+    // 手動リセット（OrangePi再起動でプロセス内の検知状態が失われ、
+    // ダッシュボードが「検知」のまま固定されてしまった場合の救済用）
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+      if (!confirm('実際に清掃済みであることを確認しましたか？\n「きれい」の状態にリセットします。')) return;
+      const btn = document.getElementById('reset-btn');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/home/api/catwatch/reset', { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        alert('リセットに失敗しました: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     // SSE 接続
     function connectSSE() {
@@ -265,7 +303,7 @@
           return;
         }
 
-        if (data.type === 'detection_alert' || data.type === 'cleanup_detected') {
+        if (data.type === 'detection_alert' || data.type === 'cleanup_detected' || data.type === 'manual_reset' || data.type === 'startup_reset') {
           applyState(data.detection, { type: data.type, timestamp: data.timestamp });
           return;
         }
