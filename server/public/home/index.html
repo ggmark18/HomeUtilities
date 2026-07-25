@@ -28,12 +28,19 @@
       margin-bottom: 16px;
     }
 
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
     .card-title {
       font-size: 0.75rem;
       color: #666;
       text-transform: uppercase;
       letter-spacing: 0.1em;
-      margin-bottom: 12px;
     }
 
     .status-row {
@@ -77,14 +84,19 @@
     .heartbeat-dot.stale { background: #f44336; }
 
     .reset-btn {
-      margin-top: 16px;
-      width: 100%;
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       background: transparent;
-      color: #888;
+      color: #666;
       border: 1px solid #333;
-      border-radius: 8px;
-      padding: 10px;
+      border-radius: 50%;
+      padding: 0;
       font-size: 0.8rem;
+      line-height: 1;
       cursor: pointer;
       transition: color 0.15s, border-color 0.15s;
     }
@@ -183,7 +195,10 @@
   </header>
 
   <div class="card" id="catwatch-card">
-    <div class="card-title">🐱 猫トイレ監視</div>
+    <div class="card-title-row">
+      <div class="card-title">🐱 猫トイレ監視</div>
+      <button class="reset-btn" id="reset-btn" title="表示を「きれい」にリセット" aria-label="表示を「きれい」にリセット">🔄</button>
+    </div>
     <div class="status-row status-unknown" id="status-row">
       <span class="status-icon" id="status-icon">⏳</span>
       <span class="status-label" id="status-label">接続中...</span>
@@ -195,7 +210,6 @@
       </div>
       <div id="last-event-label"></div>
     </div>
-    <button class="reset-btn" id="reset-btn">🔄 表示を「きれい」にリセット</button>
   </div>
 
   <div class="footer" id="footer"></div>
