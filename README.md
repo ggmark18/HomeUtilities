@@ -17,6 +17,7 @@
 【ブラウザ / Even G2 グラス / スマートフォン】
   www.cetacea.jp/home/control/ ─ ホームダッシュボード
   www.cetacea.jp/home/bus/     ─ バス運行情報
+  www.cetacea.jp/home/app/     ─ 上記2つをiframeで内包するシェル（iOSホーム画面用）
 ```
 
 ---
@@ -28,6 +29,7 @@
 | **BusCheck** | 東洋バス運行情報（Even G2 / Web） | `/home/bus/` |
 | **CatPoopWatch** | 猫トイレ監視・LINE通知 | OrangePi 常駐 |
 | **Home Control** | ホームダッシュボード（猫トイレ状態） | `/home/control/` |
+| **App Shell** | Bus/Catをiframeで内包（iOSホーム画面追加用） | `/home/app/` |
 
 新しい自宅状態レポート機能（太陽光発電など）を追加する際は、下記「リポジトリ構成」のパターンに従って `server/features/<feature>/` を追加してください。
 
@@ -54,8 +56,10 @@ HomeUtilities/
     └── public/
         ├── bus/
         │   └── index.html       # バス情報 Web 画面（/home/bus/）
-        └── home/
-            └── index.html       # ホームダッシュボード（/home/control/）
+        ├── home/
+        │   └── index.html       # ホームダッシュボード（/home/control/）
+        └── app/
+            └── index.html       # App Shell（/home/app/。上記2つをiframeで内包）
 
 CatPoopWatch/                 # OrangePi 上で動作
     ├── poop_detector.py      # カメラ監視・糞検知
@@ -258,6 +262,30 @@ OrangePi → EC2 の Webhook（`POST /home/api/catwatch/event`）を認証する
    `{"ok":true}` が返り、ダッシュボードの「OrangePi」表示が緑（生存中）に変われば設定は正しい。`401 Unauthorized` が返る場合は EC2側の値が未設定・不一致。
 
 > **注意:** `CATWATCH_SECRET` が未設定の場合、`authenticate` ミドルウェアは認証をスキップする（`server/features/catwatch/routes.js:25`、開発用の抜け道）。本番では必ず設定すること。
+
+---
+
+## 3.5 App Shell（iOSホーム画面用）
+
+`www.cetacea.jp/home/app/` は BusCheck と Home Control を `<iframe>` で内包し、ヘッダー/フッターのボタンで切り替えるだけの薄いシェルページ（`server/public/app/index.html`）。
+
+### なぜ必要か
+
+iOS Safari の「ホーム画面に追加」で standalone 表示（ブラウザUIなし）にするには `apple-mobile-web-app-capable` を全ページに設定すればよいと思われがちだが、**トップレベルのページ遷移が発生した時点でSafariのブラウザUIが復帰してしまう**という制約があり、meta タグだけでは防げない。`/home/bus/` と `/home/control/` の間を通常の `<a href>` で行き来する限りこの問題は避けられないため、両方を最初から `<iframe>` で読み込んでおき、切り替えは表示/非表示の切り替えだけ（トップレベル遷移ゼロ）で行う。
+
+- `/home/bus/` ・ `/home/control/` は直接アクセスもでき、単独でも今まで通り動作する（それぞれのページ内にも切り替えナビが付いているが、`/home/app/` の iframe 内で開かれている場合は `window.self !== window.top` を見て自動的に隠れる）。
+- **ホーム画面に追加するのは `/home/app/` の方。** `/home/bus/` や `/home/control/` を直接追加すると、この問題が再発する。
+
+### Apache 設定（App Shell）
+
+BusCheck・Home Control と同じ静的Aliasパターン。
+
+```apache
+Alias /home/app /home/homeutils/server/public/app
+<Directory /home/homeutils/server/public/app>
+    Require all granted
+</Directory>
+```
 
 ---
 

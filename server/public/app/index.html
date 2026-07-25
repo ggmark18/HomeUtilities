@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <!-- iOSホーム画面アプリ本体はこのシェルだけ。BusとCatはiframeで内包し、
+       切り替えはトップレベルのページ遷移を発生させないため、standalone表示が崩れない -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Home Utilities">
+  <title>Home Utilities</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #111;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ヘッダー（PC） */
+    header {
+      background: #1a1a1a;
+      padding: 10px 20px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 14px;
+      font-weight: 500;
+      color: #aaa;
+      letter-spacing: 0.03em;
+    }
+
+    /* アプリ切り替えナビ（PC: ヘッダー内 / スマホ: フッター固定） */
+    .app-switch {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .switch-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: #888;
+      background: transparent;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-family: inherit;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .switch-btn.active {
+      color: #fff;
+      background: #262626;
+      border-color: #4a9eff;
+    }
+    .switch-icon { font-size: 15px; line-height: 1; }
+
+    /* iframe本体 */
+    .frames {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+    }
+    .app-frame {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: none;
+    }
+    .app-frame.active { display: block; }
+
+    @media (max-width: 767px) {
+      header { padding-bottom: 10px; }
+      .app-switch {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        gap: 0;
+        padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+        background: #151515;
+        border-top: 1px solid #2a2a2a;
+        z-index: 100;
+      }
+      .switch-btn {
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 0;
+        font-size: 11px;
+      }
+      .switch-btn.active { background: #262626; border-color: transparent; }
+      .switch-icon { font-size: 20px; }
+      .frames { padding-bottom: 60px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏠 Home Utilities</h1>
+  <nav class="app-switch">
+    <button class="switch-btn active" data-target="bus" type="button">
+      <span class="switch-icon">🚌</span><span class="switch-label">Bus</span>
+    </button>
+    <button class="switch-btn" data-target="cat" type="button">
+      <span class="switch-icon">🐱</span><span class="switch-label">Cat</span>
+    </button>
+  </nav>
+</header>
+
+<div class="frames">
+  <iframe id="frame-bus" class="app-frame active" src="/home/bus/"></iframe>
+  <iframe id="frame-cat" class="app-frame" src="/home/control/"></iframe>
+</div>
+
+<script>
+  const buttons = document.querySelectorAll('.switch-btn');
+  const frames = {
+    bus: document.getElementById('frame-bus'),
+    cat: document.getElementById('frame-cat'),
+  };
+
+  function activate(target) {
+    if (!frames[target]) target = 'bus';
+    buttons.forEach(b => b.classList.toggle('active', b.dataset.target === target));
+    Object.entries(frames).forEach(([key, el]) => el.classList.toggle('active', key === target));
+    history.replaceState(null, '', '#' + target);
+  }
+
+  buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.target)));
+
+  activate(location.hash.replace('#', '') || 'bus');
+</script>
+</body>
+</html>

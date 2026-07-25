@@ -298,6 +298,12 @@
 </footer>
 
 <script>
+  // /home/app/ のシェルにiframeで内包されている場合、シェル側のナビと重複するので隠す
+  if (window.self !== window.top) {
+    const nav = document.querySelector('.app-switch');
+    if (nav) nav.style.display = 'none';
+  }
+
   const AUTO_REFRESH_MS = 30_000;
 
   // ベースパスを現在のURLから算出（末尾スラッシュを保証）

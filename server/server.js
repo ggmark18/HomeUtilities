@@ -72,6 +72,10 @@ app.use('/home/api/catwatch', catwatchRouter);
 // Home Control ダッシュボード: /home/control/*
 app.use('/home/control', express.static(path.join(publicDir, 'home')));
 
+// アプリシェル: /home/app/*（BusとCatをiframeで内包し、iOSホーム画面アプリとして
+// トップレベル遷移なしに切り替える。ホーム画面に追加するのはこのURL）
+app.use('/home/app', express.static(path.join(publicDir, 'app')));
+
 /**
  * GET /home/api/health
  * サーバー全体のヘルスチェック（ゲートウェイのワーカー起動確認にも使用）
