@@ -225,7 +225,7 @@
       </div>
       <div id="last-event-label"></div>
     </div>
-    <a class="review-link" href="/home/control/review/">📷 検知レビュー（学習データの振り分け）</a>
+    <a class="review-link" id="review-link" href="/home/control/review/" style="display: none;">📷 検知レビュー（学習データの振り分け）</a>
   </div>
 
   <div class="footer" id="footer"></div>
@@ -236,6 +236,26 @@
       const nav = document.querySelector('.app-switch');
       if (nav) nav.style.display = 'none';
     }
+
+    // 検知レビューのリンクは、レビュー待ちがある時だけ表示する
+    async function updateReviewLink() {
+      const link = document.getElementById('review-link');
+      try {
+        const res = await fetch('/home/api/catwatch/detections?label=pending');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { items } = await res.json();
+        if (items.length > 0) {
+          link.textContent = `📷 検知レビュー（${items.length}件、学習データの振り分け）`;
+          link.style.display = 'block';
+        } else {
+          link.style.display = 'none';
+        }
+      } catch (err) {
+        // 取得失敗時は現在の表示状態を維持する（誤って隠さない）
+      }
+    }
+    updateReviewLink();
+    setInterval(updateReviewLink, 60000);
 
     // 時計
     function updateClock() {
@@ -341,6 +361,7 @@
 
         if (data.type === 'detection_alert' || data.type === 'cleanup_detected' || data.type === 'manual_reset' || data.type === 'startup_reset') {
           applyState(data.detection, { type: data.type, timestamp: data.timestamp });
+          updateReviewLink();
           return;
         }
       };
