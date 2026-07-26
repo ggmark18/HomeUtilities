@@ -1,7 +1,9 @@
 'use strict';
 
-const { Router } = require('express');
-const router = Router();
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const router = express.Router();
 
 // ========= 状態管理 =========
 let state = {
@@ -9,6 +11,29 @@ let state = {
   lastHeartbeat: null,      // Unix timestamp (seconds)
   lastEvent: null,          // { type, timestamp }
 };
+
+// ========= 検知レビュー（学習データの振り分け）永続化 =========
+// フロー:
+//   1. poop_detector.pyが検知確定時にROI画像をPOST /detectionsで送る（label='pending'で保存）
+//   2. ダッシュボードがGET /detections?label=pendingで一覧表示、POST /detections/:id/labelで振り分け
+//   3. cleaner_control.pyがGET /detections/unsyncedを定期的にポーリングし、ローカルのtraining_data/を更新
+//   4. 反映が終わったらPOST /detections/:id/ackでEC2側の画像を削除（training_data/がOrangePi側の恒久保存先）
+const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'catwatch');
+const IMAGES_DIR = path.join(DATA_DIR, 'images');
+const DB_FILE = path.join(DATA_DIR, 'detections.json');
+fs.mkdirSync(IMAGES_DIR, { recursive: true });
+
+function loadDetections() {
+  try {
+    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveDetections(list) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(list, null, 2));
+}
 
 const sseClients = new Set();
 
@@ -70,6 +95,112 @@ router.post('/event', authenticate, (req, res) => {
 
   console.warn(`[catwatch] 不明なevent type: ${type}`);
   res.status(400).json({ error: 'unknown event type' });
+});
+
+// ========= 検知レビュー（学習データの振り分け） =========
+
+// OrangePi(poop_detector.py)からの検知画像アップロード
+// POST /home/api/catwatch/detections?id=20260726_120000  body: image/jpeg (raw)
+router.post(
+  '/detections',
+  authenticate,
+  express.raw({ type: 'image/jpeg', limit: '5mb' }),
+  (req, res) => {
+    const { id } = req.query;
+    if (!id || !/^[0-9_]+$/.test(id)) {
+      return res.status(400).json({ error: 'invalid id' });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'image body required' });
+    }
+
+    fs.writeFileSync(path.join(IMAGES_DIR, `${id}.jpg`), req.body);
+
+    const detections = loadDetections();
+    if (!detections.find((d) => d.id === id)) {
+      detections.push({
+        id,
+        label: 'pending',
+        createdAt: Math.floor(Date.now() / 1000),
+        synced: false,
+      });
+      saveDetections(detections);
+    }
+    console.log(`[catwatch] 検知画像を受信: id=${id}`);
+    res.json({ ok: true });
+  }
+);
+
+// ダッシュボード: レビュー一覧取得
+// GET /home/api/catwatch/detections?label=pending
+router.get('/detections', (req, res) => {
+  const { label } = req.query;
+  const detections = loadDetections();
+  const items = label ? detections.filter((d) => d.label === label) : detections;
+  // 新しい順
+  items.sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ items });
+});
+
+// ダッシュボード: 検知画像の取得
+// GET /home/api/catwatch/detections/:id/image
+router.get('/detections/:id/image', (req, res) => {
+  // req.params.idをそのままpath.joinに渡すとパストラバーサルの恐れがあるため検証する
+  if (!/^[0-9_]+$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'invalid id' });
+  }
+  const imgPath = path.join(IMAGES_DIR, `${req.params.id}.jpg`);
+  if (!fs.existsSync(imgPath)) return res.status(404).end();
+  res.sendFile(imgPath);
+});
+
+// ダッシュボード: レビュー結果の記録（✅糞でした / ❌誤検知）
+// 家族が使う操作のため、/resetと同様にOrangePi向けのBearer認証は不要
+// POST /home/api/catwatch/detections/:id/label  body: { label: 'poop' | 'no_poop' }
+// JSONボディの解析はserver.jsでグローバルに適用済み（express.json()）のためここでは不要
+router.post('/detections/:id/label', (req, res) => {
+  const { label } = req.body || {};
+  if (label !== 'poop' && label !== 'no_poop') {
+    return res.status(400).json({ error: 'label must be poop or no_poop' });
+  }
+
+  const detections = loadDetections();
+  const d = detections.find((d) => d.id === req.params.id);
+  if (!d) return res.status(404).json({ error: 'not found' });
+
+  d.label = label;
+  d.labeledAt = Math.floor(Date.now() / 1000);
+  d.synced = false;
+  saveDetections(detections);
+
+  console.log(`[catwatch] レビュー結果: id=${d.id} → ${label}`);
+  res.json({ ok: true });
+});
+
+// OrangePi(cleaner_control.py)からのポーリング: まだtraining_data/に反映していないラベルを取得
+// GET /home/api/catwatch/detections/unsynced
+router.get('/detections/unsynced', authenticate, (req, res) => {
+  const detections = loadDetections();
+  const items = detections
+    .filter((d) => d.label !== 'pending' && !d.synced)
+    .map((d) => ({ id: d.id, label: d.label }));
+  res.json({ items });
+});
+
+// OrangePi: training_data/への反映完了報告。EC2側の画像はもう不要なので削除する
+// （training_data/がOrangePi側の恒久保存先で、EC2側はレビュー用の一時置き場のため）
+// POST /home/api/catwatch/detections/:id/ack
+router.post('/detections/:id/ack', authenticate, (req, res) => {
+  const detections = loadDetections();
+  const d = detections.find((d) => d.id === req.params.id);
+  if (!d) return res.status(404).json({ error: 'not found' });
+
+  d.synced = true;
+  saveDetections(detections);
+  fs.unlink(path.join(IMAGES_DIR, `${d.id}.jpg`), () => {});
+
+  console.log(`[catwatch] 同期完了: id=${d.id} (${d.label})`);
+  res.json({ ok: true });
 });
 
 // ========= 手動リセット（ダッシュボードから） =========

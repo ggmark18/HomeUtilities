@@ -9,6 +9,10 @@ plugin/*.ehpk
 server/.local-chromium/
 server/.cache/
 
+# CatPoopWatch: レビュー待ち検知画像（training_data/がOrangePi側の恒久保存先のため、
+# ここはレビュー用の一時データ）
+server/data/
+
 # 環境設定・秘密情報（.env.example と plugin/.env のみコミット）
 .env.local
 .env.*.local

@@ -186,6 +186,28 @@ Home Control ダッシュボード
 
 OrangePi からの `POST /home/api/catwatch/event` は `CATWATCH_SECRET` による Bearer 認証で保護されている。OrangePi 側（CatPoopWatch リポジトリの `.env`）の `CATWATCH_WEBHOOK_URL` / `CATWATCH_SECRET` と、EC2 側 `server/.env` の `CATWATCH_SECRET` が一致している必要がある。
 
+### 検知レビュー（学習データの振り分け）
+
+誤検知が学習データに混入するのを防ぐため、`training_data/pending/` に溜まった検知画像をダッシュボードから確認し、「✅ 糞でした」「❌ 誤検知」を選んで振り分けられる（`/home/control/review/`）。
+
+```
+poop_detector.py (検知確定時)
+    ↓ POST /home/api/catwatch/detections（画像アップロード、Bearer認証）
+EC2: server/data/catwatch/ に一時保存（label='pending'）
+    ↓
+ダッシュボード（/home/control/review/）で ✅/❌ を選択
+    ↓ POST /home/api/catwatch/detections/:id/label
+EC2側のレコードを更新（label='poop'|'no_poop', synced=false）
+    ↓
+cleaner_control.py が30秒ごとにポーリング
+    ↓ GET /home/api/catwatch/detections/unsynced（Bearer認証）
+training_data/pending/ の該当ファイルを poop/ or no_poop/ へ移動
+    ↓ POST /home/api/catwatch/detections/:id/ack（Bearer認証）
+EC2側の画像を削除（training_data/がOrangePi側の恒久保存先のため）
+```
+
+OrangePiは自宅NAT内にあり外部から直接到達できないため、EC2→OrangePiの通信は行わず、常にOrangePi側が起点（push/poll）になる設計にしてある。
+
 ---
 
 ## 3. Home Control ダッシュボード
@@ -199,6 +221,12 @@ OrangePi からの `POST /home/api/catwatch/event` は `CATWATCH_SECRET` によ�
 | `POST /home/api/catwatch/event` | OrangePi からのイベント受信（Bearer 認証） |
 | `GET /home/api/catwatch/status` | 現在の状態取得 |
 | `GET /home/api/catwatch/stream` | SSE リアルタイムストリーム |
+| `POST /home/api/catwatch/detections` | OrangePi からの検知画像アップロード（Bearer 認証） |
+| `GET /home/api/catwatch/detections` | レビュー一覧取得（`?label=pending`等） |
+| `GET /home/api/catwatch/detections/:id/image` | 検知画像の取得 |
+| `POST /home/api/catwatch/detections/:id/label` | ダッシュボードからの振り分け（`poop` / `no_poop`） |
+| `GET /home/api/catwatch/detections/unsynced` | OrangePi からの未同期ラベル取得（Bearer 認証） |
+| `POST /home/api/catwatch/detections/:id/ack` | OrangePi からの反映完了報告（Bearer 認証） |
 
 ### Apache 設定（Home Control）
 

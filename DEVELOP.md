@@ -175,9 +175,16 @@ npm run pack
 | `GET /home/bus/api/bus?refresh=1` | 強制再取得（キャッシュ無視） |
 | `GET /home/bus/api/debug` | スクレイピング生データ（セレクタ調整用） |
 | `GET /home/control/` | Home Control ダッシュボード（index.html） |
+| `GET /home/control/review/` | 検知レビュー画面（学習データの振り分け） |
 | `POST /home/api/catwatch/event` | OrangePi からのイベント受信（Bearer認証） |
 | `GET /home/api/catwatch/status` | 猫トイレ監視の現在状態 |
 | `GET /home/api/catwatch/stream` | SSE リアルタイムストリーム |
+| `POST /home/api/catwatch/detections` | OrangePi からの検知画像アップロード（Bearer認証） |
+| `GET /home/api/catwatch/detections` | レビュー一覧取得（`?label=pending`等） |
+| `GET /home/api/catwatch/detections/:id/image` | 検知画像の取得 |
+| `POST /home/api/catwatch/detections/:id/label` | ダッシュボードからの振り分け |
+| `GET /home/api/catwatch/detections/unsynced` | OrangePi からの未同期ラベル取得（Bearer認証） |
+| `POST /home/api/catwatch/detections/:id/ack` | OrangePi からの反映完了報告（Bearer認証） |
 | `GET /home/api/health` | サーバー全体の状態確認（機能共通） |
 
 ---
@@ -227,7 +234,11 @@ HomeUtilities/
     │   │   ├── routes.js      # BusCheck API（/home/bus/api/*）。/config・/bus・/debug
     │   │   └── scraper.js     # Puppeteer スクレイパー
     │   └── catwatch/
-    │       └── routes.js      # CatPoopWatch API（/home/api/catwatch/*）。SSE・Webhook受信
+    │       └── routes.js      # CatPoopWatch API（/home/api/catwatch/*）。SSE・Webhook受信・検知レビュー
+    ├── data/
+    │   └── catwatch/          # 検知レビュー用の一時データ（gitignore対象、自動生成）
+    │       ├── detections.json
+    │       └── images/
     └── public/
         ├── bus/
         │   └── index.html     # スマートフォン用Web画面（/home/bus/）
