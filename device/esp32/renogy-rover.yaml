@@ -98,6 +98,12 @@ globals:
   - id: g_battery_temp
     type: float
     initial_value: 'NAN'
+  - id: g_load_voltage
+    type: float
+    initial_value: 'NAN'
+  - id: g_load_current
+    type: float
+    initial_value: 'NAN'
   - id: g_load_power
     type: float
     initial_value: 'NAN'
@@ -152,6 +158,8 @@ sensor:
         uint8_t batt_raw = temps & 0xFF;
         id(g_controller_temp) = (ctrl_raw & 0x80) ? -(float)(ctrl_raw & 0x7F) : (float) ctrl_raw;
         id(g_battery_temp) = (batt_raw & 0x80) ? -(float)(batt_raw & 0x7F) : (float) batt_raw;
+        id(g_load_voltage) = reg16(4) * 0.1f;
+        id(g_load_current) = reg16(5) * 0.01f;
         id(g_load_power) = (float) reg16(6);
         id(g_solar_voltage) = reg16(7) * 0.1f;
         id(g_solar_current) = reg16(8) * 0.01f;
@@ -227,13 +235,15 @@ interval:
             Authorization: !secret solar_auth_header
             Content-Type: "application/json"
           body: !lambda |-
-            char buf[400];
+            char buf[450];
             snprintf(buf, sizeof(buf),
               "{\"soc\":%.0f,\"batteryVoltage\":%.2f,\"chargingCurrent\":%.2f,\"chargingPower\":%.0f,"
-              "\"solarVoltage\":%.2f,\"solarCurrent\":%.2f,\"loadPower\":%.0f,\"batteryTemp\":%.0f,"
+              "\"solarVoltage\":%.2f,\"solarCurrent\":%.2f,\"loadVoltage\":%.2f,\"loadCurrent\":%.2f,"
+              "\"loadPower\":%.0f,\"batteryTemp\":%.0f,"
               "\"controllerTemp\":%.0f,\"generationToday\":%.0f,\"chargingState\":\"%s\",\"fault\":%d}",
               id(g_soc), id(g_battery_voltage), id(g_charging_current), id(g_charging_power),
-              id(g_solar_voltage), id(g_solar_current), id(g_load_power), id(g_battery_temp),
+              id(g_solar_voltage), id(g_solar_current), id(g_load_voltage), id(g_load_current),
+              id(g_load_power), id(g_battery_temp),
               id(g_controller_temp), id(g_generation_today), id(g_charging_state).c_str(), id(g_fault));
             return std::string(buf);
           on_response:

@@ -23,6 +23,8 @@ let state = {
   chargingPower: null,    // 充電電力 [W]
   solarVoltage: null,     // PV電圧 [V]
   solarCurrent: null,     // PV電流 [A]
+  loadVoltage: null,      // 負荷電圧 [V]
+  loadCurrent: null,      // 負荷電流 [A]
   loadPower: null,        // 負荷電力 [W]
   batteryTemp: null,      // バッテリー温度 [℃]
   controllerTemp: null,   // コントローラー温度 [℃]
@@ -79,8 +81,8 @@ function num(value, { min, max }) {
 // ========= ESP32 からの状態レポート受信 =========
 // POST /home/api/solar/report
 // body: { soc, batteryVoltage, chargingCurrent, chargingPower, solarVoltage,
-//         solarCurrent, loadPower, batteryTemp, controllerTemp,
-//         generationToday, chargingState, fault }
+//         solarCurrent, loadVoltage, loadCurrent, loadPower, batteryTemp,
+//         controllerTemp, generationToday, chargingState, fault }
 // 送信されなかったキーは前回値を維持する（ESP32側で一部のセンサーだけ
 // 更新タイミングがずれても、ダッシュボードが欠測表示にならないようにするため）。
 router.post('/report', authenticate, (req, res) => {
@@ -94,6 +96,8 @@ router.post('/report', authenticate, (req, res) => {
     chargingPower:   num(b.chargingPower,   { min: 0,    max: 10000 }),
     solarVoltage:    num(b.solarVoltage,    { min: 0,    max: 200 }),
     solarCurrent:    num(b.solarCurrent,    { min: 0,    max: 200 }),
+    loadVoltage:     num(b.loadVoltage,     { min: 0,    max: 100 }),
+    loadCurrent:     num(b.loadCurrent,     { min: 0,    max: 200 }),
     loadPower:       num(b.loadPower,       { min: 0,    max: 10000 }),
     batteryTemp:     num(b.batteryTemp,     { min: -50,  max: 120 }),
     controllerTemp:  num(b.controllerTemp,  { min: -50,  max: 120 }),

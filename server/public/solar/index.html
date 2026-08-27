@@ -221,28 +221,41 @@
     </nav>
   </header>
 
-  <div class="card" id="solar-card">
+  <!-- 上段: ソーラーパネル -->
+  <div class="card" id="panel-card">
     <div class="card-title-row">
-      <div class="card-title">🔋 蓄電池</div>
+      <div class="card-title">☀️ ソーラーパネル</div>
       <span class="state-badge" id="solar-state">--</span>
+    </div>
+    <div class="solar-grid">
+      <div class="solar-item">
+        <div class="solar-item-label">電圧</div>
+        <div class="solar-item-value" id="panel-voltage">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">電流</div>
+        <div class="solar-item-value" id="panel-current">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">電力</div>
+        <div class="solar-item-value" id="panel-power">--</div>
+      </div>
+    </div>
+    <div class="meta">
+      <div>本日の発電: <span id="solar-generation">--</span></div>
+    </div>
+  </div>
+
+  <!-- 中段: バッテリー -->
+  <div class="card" id="battery-card">
+    <div class="card-title-row">
+      <div class="card-title">🔋 バッテリー</div>
     </div>
     <div class="soc-row soc-none" id="soc-row">
       <span class="soc-value" id="soc-value">--</span><span class="soc-unit">%</span>
     </div>
     <div class="soc-bar"><div class="soc-bar-fill" id="soc-bar-fill"></div></div>
     <div class="solar-grid">
-      <div class="solar-item">
-        <div class="solar-item-label">バッテリー電圧</div>
-        <div class="solar-item-value" id="solar-voltage">--</div>
-      </div>
-      <div class="solar-item">
-        <div class="solar-item-label">充電電力</div>
-        <div class="solar-item-value" id="solar-charge">--</div>
-      </div>
-      <div class="solar-item">
-        <div class="solar-item-label">本日の発電</div>
-        <div class="solar-item-value" id="solar-generation">--</div>
-      </div>
       <div class="solar-item">
         <div class="solar-item-label">バッテリー温度</div>
         <div class="solar-item-value" id="solar-battery-temp">--</div>
@@ -258,6 +271,27 @@
         <span id="solar-hb-label">コントローラー: 確認中</span>
       </div>
       <div id="solar-fault-label"></div>
+    </div>
+  </div>
+
+  <!-- 下段: 負荷(Load) -->
+  <div class="card" id="load-card">
+    <div class="card-title-row">
+      <div class="card-title">🔌 負荷 (Load)</div>
+    </div>
+    <div class="solar-grid">
+      <div class="solar-item">
+        <div class="solar-item-label">電圧</div>
+        <div class="solar-item-value" id="load-voltage">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">電流</div>
+        <div class="solar-item-value" id="load-current">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">電力</div>
+        <div class="solar-item-value" id="load-power">--</div>
+      </div>
     </div>
   </div>
 
@@ -358,11 +392,20 @@
         badge.className = 'state-badge';
       }
 
-      document.getElementById('solar-voltage').textContent    = fmt(s.batteryVoltage, ' V', 1);
-      document.getElementById('solar-charge').textContent     = fmt(s.chargingPower, ' W');
+      // 上段: ソーラーパネル
+      document.getElementById('panel-voltage').textContent    = fmt(s.solarVoltage, ' V', 1);
+      document.getElementById('panel-current').textContent    = fmt(s.solarCurrent, ' A', 2);
+      document.getElementById('panel-power').textContent      = fmt(s.chargingPower, ' W');
       document.getElementById('solar-generation').textContent = fmt(s.generationToday, ' Wh');
+
+      // 中段: バッテリー
       document.getElementById('solar-battery-temp').textContent = fmt(s.batteryTemp, ' °C');
       document.getElementById('solar-controller-temp').textContent = fmt(s.controllerTemp, ' °C');
+
+      // 下段: 負荷(Load)
+      document.getElementById('load-voltage').textContent = fmt(s.loadVoltage, ' V', 1);
+      document.getElementById('load-current').textContent = fmt(s.loadCurrent, ' A', 2);
+      document.getElementById('load-power').textContent   = fmt(s.loadPower, ' W');
 
       // 障害ビット（0なら正常なので何も出さない）
       const fault = document.getElementById('solar-fault-label');
