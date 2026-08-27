@@ -17,6 +17,7 @@ server/data/
 .env.local
 .env.*.local
 server/.env
+device/esp32/secrets.yaml
 
 # OS・エディタ
 .DS_Store

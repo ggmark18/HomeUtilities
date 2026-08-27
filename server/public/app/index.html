@@ -122,12 +122,16 @@
     <button class="switch-btn" data-target="cat" type="button">
       <span class="switch-icon">🐱</span><span class="switch-label">Cat</span>
     </button>
+    <button class="switch-btn" data-target="solar" type="button">
+      <span class="switch-icon">☀️</span><span class="switch-label">Solar</span>
+    </button>
   </nav>
 </header>
 
 <div class="frames">
   <iframe id="frame-bus" class="app-frame active" src="/home/bus/"></iframe>
   <iframe id="frame-cat" class="app-frame" src="/home/control/"></iframe>
+  <iframe id="frame-solar" class="app-frame" src="/home/solar/"></iframe>
 </div>
 
 <script>
@@ -135,6 +139,7 @@
   const frames = {
     bus: document.getElementById('frame-bus'),
     cat: document.getElementById('frame-cat'),
+    solar: document.getElementById('frame-solar'),
   };
 
   function activate(target) {

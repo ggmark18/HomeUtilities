@@ -7,6 +7,7 @@ const path = require('path');
 
 const busRouter = require('./features/bus/routes');
 const catwatchRouter = require('./features/catwatch/routes');
+const solarRouter = require('./features/solar/routes');
 
 const app = express();
 const publicDir = path.join(__dirname, 'public');
@@ -60,7 +61,9 @@ app.get('/', (req, res) => res.redirect('/home/bus/'));
 // 各機能は自分のURL配下に閉じる:
 //   静的UIを持つ機能    → /home/<feature>/          + /home/<feature>/api/*
 //   API のみの機能      → /home/api/<feature>/*
-// 新機能（太陽光発電など）を追加する際は同じパターンで features/ 配下にフォルダを追加する。
+// 新機能を追加する際は同じパターンで features/ 配下にフォルダを追加する。
+// 太陽光発電は両対応: APIは /home/api/solar/*、専用画面は /home/solar/*（2026-08-27〜、
+// 当初はダッシュボード組み込みだったが専用タブ化した。CLAUDE.md参照）。
 
 // BusCheck: /home/bus/*
 app.use('/home/bus', express.static(path.join(publicDir, 'bus')));
@@ -69,10 +72,14 @@ app.use('/home/bus/api', busRouter);
 // CatPoopWatch: /home/api/catwatch/*（Home Control ダッシュボードの1コンポーネント）
 app.use('/home/api/catwatch', catwatchRouter);
 
+// 太陽光発電（Renogy Rover Li）: /home/api/solar/* + /home/solar/*（専用画面、bus方式）
+app.use('/home/api/solar', solarRouter);
+app.use('/home/solar', express.static(path.join(publicDir, 'solar')));
+
 // Home Control ダッシュボード: /home/control/*
 app.use('/home/control', express.static(path.join(publicDir, 'home')));
 
-// アプリシェル: /home/app/*（BusとCatをiframeで内包し、iOSホーム画面アプリとして
+// アプリシェル: /home/app/*（Bus・Cat・Solarをiframeで内包し、iOSホーム画面アプリとして
 // トップレベル遷移なしに切り替える。ホーム画面に追加するのはこのURL）
 app.use('/home/app', express.static(path.join(publicDir, 'app')));
 
@@ -98,5 +105,6 @@ app.listen(PORT, () => {
   console.log(`  GET  /home/bus/api/bus       - 次のバス一覧`);
   console.log(`  GET  /home/control           - Home Control ダッシュボード`);
   console.log(`  GET  /home/api/catwatch/*    - CatPoopWatch API`);
+  console.log(`  GET  /home/api/solar/*       - 太陽光発電 API`);
   console.log(`  GET  /home/api/health        - ヘルスチェック`);
 });

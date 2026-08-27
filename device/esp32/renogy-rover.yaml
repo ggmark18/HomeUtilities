@@ -1,0 +1,473 @@
+# ============================================================
+# Renogy Rover Li (RNG-CTRL-RVR20 / G2・RS485)
+#   × Waveshare ESP32-S3-Relay-6CH
+#
+# 構成:
+#   - ボード電源: RoverのLOAD端子 → ヒューズ2A → 本機の電源ネジ端子(7〜36V)
+#     ※LOAD端子は「常時ON」に設定しておくこと(下のボタンで設定可)
+#   - RS485: Rover RJ45 ピン6(A) / ピン7(B) / ピン5(基準線) →
+#     本機のRS485端子 A+ / B− / ⏚(アースマーク、RS485用の基準線端子。実測確認済み・SOLAR.md §7-2)
+#   - DC出力制御: 内蔵リレー CH1 (GPIO1) の COM/NO 接点で開閉
+#
+# 事前準備:
+#   - secrets.yaml に wifi_ssid / wifi_password を定義
+#   - 初回に「Set Load Mode: Always-On」ボタンを一度押す
+#
+# 注意: Modbusの「Load Terminal」スイッチをOFFにすると本機の電源も
+#       落ちて遠隔復帰できないため、デフォルト無効化してある
+# ============================================================
+
+esphome:
+  name: renogy-rover
+  friendly_name: Renogy Rover
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+logger:
+  level: VERY_VERBOSE
+  logs:
+    uart: VERY_VERBOSE
+    modbus: VERY_VERBOSE
+    modbus_controller: VERY_VERBOSE
+
+api:
+  reboot_timeout: 0s   # クライアント無しでの自動再起動を無効化（HA等を常時繋がない構成のため）
+ota:
+  platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: light   # 省電力（バッテリー駆動のため）。API/Web応答が多少遅延することは許容
+  ap:
+    ssid: "Renogy-Rover Fallback"
+
+# ---------------- 【一時テスト用】BT-2経由でのBLE疎通確認 ----------------
+# BT-TH-E72CF547 (MAC 7C:72:E7:2C:F5:47) に接続し、Modbusリクエストを書き込んで
+# 応答が取れるか確認する。原因切り分けが済んだら本実装に置き換えるか削除する
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+ble_client:
+  - mac_address: 7C:72:E7:2C:F5:47
+    id: bt2_client
+    on_connect:
+      then:
+        - lambda: |-
+            ESP_LOGI("bt2", "Connected to BT-2");
+    on_disconnect:
+      then:
+        - lambda: |-
+            ESP_LOGI("bt2", "Disconnected from BT-2");
+
+interval:
+  - interval: 10s
+    then:
+      - ble_client.ble_write:
+          id: bt2_client
+          service_uuid: ffd0
+          characteristic_uuid: ffd1
+          # BT-2独自プロトコル: 先頭バイトは固定0xFF（Roverの実アドレス0x01ではない）。
+          # renogy-bt2-readerのREADME例(ff 03 01 00 00 07 -> 10 2a)で検証したCRC計算に基づく。
+          # 0x0100番地から11レジスタ読み取り
+          value: [0xFF, 0x03, 0x01, 0x00, 0x00, 0x0B, 0x10, 0x2F]
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# 時刻同期(スケジュール制御用。HAが無くてもNTPで動作)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Asia/Tokyo
+    # --- 時間による自動ON/OFFの例(使う場合はコメント解除して編集) ---
+    # on_time:
+    #   - hours: 18
+    #     minutes: 0
+    #     then:
+    #       - switch.turn_on: dc_output
+    #   - hours: 23
+    #     minutes: 0
+    #     then:
+    #       - switch.turn_off: dc_output
+
+# ---------------- UART / Modbus ----------------
+# Waveshare ESP32-S3-Relay-6CH のRS485は方向自動制御のため
+# flow_control_pin は不要
+uart:
+  id: uart_rs485
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 9600          # 9600/4800/19200すべて無応答だったため公式仕様の9600に戻す
+  stop_bits: 1
+  parity: NONE
+
+modbus:
+  id: modbus_bus
+  uart_id: uart_rs485
+
+modbus_controller:
+  - id: rover
+    address: 0x01          # 0x01/0xFF/0xF7すべて無応答だったため標準の0x01に戻して配線確認中
+    modbus_id: modbus_bus
+    update_interval: 10s
+    command_throttle: 100ms
+    setup_priority: -10
+
+# ---------------- センサー ----------------
+sensor:
+  # 【一時テスト用】BT-2経由のBLE疎通確認
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: bt2_client
+    service_uuid: fff0
+    characteristic_uuid: fff1
+    notify: true
+    id: bt2_notify_raw
+    internal: true
+    lambda: |-
+      ESP_LOGI("bt2", "notify: %s", format_hex_pretty(x).c_str());
+      return x.size();
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Battery SOC"
+    id: battery_soc
+    address: 0x0100
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    # --- SOC条件による保護の例: 40%未満でDC出力OFF(使う場合はコメント解除) ---
+    # on_value_range:
+    #   - below: 40
+    #     then:
+    #       - switch.turn_off: dc_output
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Battery Voltage"
+    address: 0x0101
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Charging Current"
+    address: 0x0102
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  # 0x0103: 上位バイト=コントローラ温度 / 下位バイト=バッテリー温度
+  # 各バイトの b7 が符号ビット
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Controller Temperature"
+    address: 0x0103
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          uint16_t raw = (uint16_t) x;
+          uint8_t b = raw >> 8;
+          return (b & 0x80) ? -(float)(b & 0x7F) : (float)b;
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Battery Temperature"
+    address: 0x0103
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          uint16_t raw = (uint16_t) x;
+          uint8_t b = raw & 0xFF;
+          return (b & 0x80) ? -(float)(b & 0x7F) : (float)b;
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Load Voltage"
+    address: 0x0104
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Load Current"
+    address: 0x0105
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Load Power"
+    address: 0x0106
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Solar Voltage"
+    address: 0x0107
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Solar Current"
+    address: 0x0108
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Charging Power"
+    address: 0x0109
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Charge Ah Today"
+    address: 0x0111
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Ah"
+    state_class: total_increasing
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Generation Today"
+    address: 0x0113
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Wh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 0
+
+  # 0x0121-0x0122 障害ビット (0なら正常)
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Fault Bits"
+    address: 0x0121
+    register_type: holding
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+# ---------------- 状態 ----------------
+text_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Charging State"
+    address: 0x0120
+    register_type: holding
+    raw_encode: HEXBYTES
+    lambda: |-
+      uint16_t value = modbus::helpers::word_from_hex_str(x, 0);
+      switch (value & 0xFF) {
+        case 0: return std::string("Deactivated");
+        case 1: return std::string("Activated");
+        case 2: return std::string("MPPT");
+        case 3: return std::string("Equalizing");
+        case 4: return std::string("Boost");
+        case 5: return std::string("Float");
+        case 6: return std::string("Current limiting");
+        default: return std::string("Unknown");
+      }
+
+binary_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Load Terminal State (reported)"
+    address: 0x0120
+    register_type: holding
+    bitmask: 0x8000   # 上位バイト b7 = 負荷ON
+    entity_category: diagnostic
+
+  # 基板上のBOOTボタン
+  - platform: gpio
+    name: "Board Button"
+    pin:
+      number: GPIO0
+      inverted: true
+      ignore_strapping_warning: true
+      mode:
+        input: true
+        pullup: true
+    entity_category: diagnostic
+
+# ---------------- 制御 ----------------
+switch:
+  # ▼ メインの制御スイッチ: 内蔵リレー CH1 でDC出力をON/OFF
+  - platform: gpio
+    name: "DC Output"
+    id: dc_output
+    pin: GPIO1
+    icon: "mdi:power-socket"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  # 予備リレー CH2〜CH6 (使わないならこのまま非表示)
+  - platform: gpio
+    name: "Relay CH2"
+    pin: GPIO2
+    disabled_by_default: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: gpio
+    name: "Relay CH3"
+    pin: GPIO41
+    disabled_by_default: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: gpio
+    name: "Relay CH4"
+    pin: GPIO42
+    disabled_by_default: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  # CH5/CH6 はESP32-S3のストラッピングピン(基板側の設計)。
+  # 警告は抑制するが、外部プルアップ/ダウンを付けないこと
+  - platform: gpio
+    name: "Relay CH5"
+    pin:
+      number: GPIO45
+      ignore_strapping_warning: true
+    disabled_by_default: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: gpio
+    name: "Relay CH6"
+    pin:
+      number: GPIO46
+      ignore_strapping_warning: true
+    disabled_by_default: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  # ⚠ LOAD端子 ON/OFF (レジスタ 0x010A)
+  #    本機はLOAD端子から給電されているため、OFFにすると本機も停止し
+  #    遠隔で復帰できない。誤操作防止のためデフォルト無効化
+  - platform: modbus_controller
+    modbus_controller_id: rover
+    name: "Load Terminal (DANGER: self power-off)"
+    id: load_output
+    register_type: holding
+    address: 0x010A
+    disabled_by_default: true
+    entity_category: config
+    write_lambda: |-
+      payload.push_back(x ? 0x0001 : 0x0000);
+      return x ? 1.0 : 0.0;
+
+# ---------------- 表示・音 ----------------
+# 基板上のRGB LED: 通信状態の可視化に使う
+light:
+  - platform: esp32_rmt_led_strip
+    name: "Status LED"
+    id: status_led
+    pin: GPIO38
+    num_leds: 1
+    chipset: WS2812
+    rgb_order: GRB
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+output:
+  - platform: ledc
+    id: buzzer_out
+    pin: GPIO21
+
+rtttl:
+  id: buzzer
+  output: buzzer_out
+
+# ---------------- ボタン ----------------
+button:
+  # LOAD端子を常時ONモード(17)に設定 — 初回に一度押す(必須)
+  - platform: template
+    name: "Set Load Mode: Always-On"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          auto cmd = modbus_controller::ModbusCommandItem::create_write_single_command(
+              id(rover), 0xE01D, 17);
+          id(rover)->queue_command(cmd);
+
+  # 参考: 手動モード(15) — Modbusで0x010Aを使いたい場合のみ
+  - platform: template
+    name: "Set Load Mode: Manual"
+    entity_category: config
+    disabled_by_default: true
+    on_press:
+      - lambda: |-
+          auto cmd = modbus_controller::ModbusCommandItem::create_write_single_command(
+              id(rover), 0xE01D, 15);
+          id(rover)->queue_command(cmd);
+
+  - platform: restart
+    name: "Restart"
+    entity_category: config

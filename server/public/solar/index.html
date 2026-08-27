@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- iOSホーム画面アプリ: /home/bus/ /home/control/ と同じ設定を入れて揃える（片方だけ欠けると
+       そちらのページに遷移した瞬間にSafariのブラウザUIが復帰してしまう） -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Home Utilities">
+  <title>Solar</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #e8e8e8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      color: #888;
+      margin-bottom: 20px;
+      letter-spacing: 0.05em;
+    }
+
+    .card {
+      background: #1e1e1e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .card-title {
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 0.75rem;
+      color: #555;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .heartbeat-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #555;
+      margin-right: 6px;
+      transition: background 0.3s;
+    }
+    .heartbeat-dot.alive { background: #4caf50; }
+    .heartbeat-dot.stale { background: #f44336; }
+
+    /* ── 蓄電池カード ── */
+    .state-badge {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      color: #888;
+      background: #262626;
+      border: 1px solid #333;
+      border-radius: 999px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+    .state-badge.charging { color: #4caf50; border-color: #2e5c30; }
+    .state-badge.idle     { color: #888; }
+
+    .soc-row {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+    .soc-value { font-size: 2.6rem; font-weight: 600; line-height: 1; }
+    .soc-unit  { font-size: 1rem; color: #666; }
+    .soc-high .soc-value { color: #4caf50; }
+    .soc-mid  .soc-value { color: #ffb300; }
+    .soc-low  .soc-value { color: #f44336; }
+    .soc-none .soc-value { color: #555; }
+
+    .soc-bar {
+      margin-top: 10px;
+      height: 6px;
+      border-radius: 3px;
+      background: #2a2a2a;
+      overflow: hidden;
+    }
+    .soc-bar-fill {
+      height: 100%;
+      width: 0;
+      border-radius: 3px;
+      background: #555;
+      transition: width 0.4s, background 0.4s;
+    }
+
+    .solar-grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .solar-item-label {
+      font-size: 0.65rem;
+      color: #666;
+      margin-bottom: 3px;
+    }
+    .solar-item-value {
+      font-size: 0.95rem;
+      color: #ddd;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 0.7rem;
+      color: #444;
+      text-align: right;
+    }
+
+    #clock {
+      font-size: 0.85rem;
+      color: #555;
+      text-align: right;
+      margin-bottom: 16px;
+    }
+
+    /* ヘッダー */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .page-header h1 { margin-bottom: 0; }
+
+    /* アプリ切り替えナビ（PC: ヘッダー内 / スマホ: フッター固定） */
+    .app-switch {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .switch-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+      color: #888;
+      background: transparent;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 6px 14px;
+      font-size: 13px;
+      white-space: nowrap;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .switch-btn.active {
+      color: #fff;
+      background: #262626;
+      border-color: #4a9eff;
+    }
+    .switch-icon { font-size: 15px; line-height: 1; }
+
+    @media (max-width: 767px) {
+      .app-switch {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        gap: 0;
+        padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+        background: #151515;
+        border-top: 1px solid #2a2a2a;
+        z-index: 100;
+      }
+      .switch-btn {
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 0;
+        font-size: 11px;
+      }
+      .switch-btn.active { background: #262626; border-color: transparent; }
+      .switch-icon { font-size: 20px; }
+      body { padding-bottom: 64px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="clock">--:--:--</div>
+  <header class="page-header">
+    <h1>☀️ Solar</h1>
+    <nav class="app-switch">
+      <a href="/home/bus/" class="switch-btn">
+        <span class="switch-icon">🚌</span><span class="switch-label">Bus</span>
+      </a>
+      <a href="/home/control/" class="switch-btn">
+        <span class="switch-icon">🐱</span><span class="switch-label">Cat</span>
+      </a>
+      <a href="/home/solar/" class="switch-btn active">
+        <span class="switch-icon">☀️</span><span class="switch-label">Solar</span>
+      </a>
+    </nav>
+  </header>
+
+  <div class="card" id="solar-card">
+    <div class="card-title-row">
+      <div class="card-title">🔋 蓄電池</div>
+      <span class="state-badge" id="solar-state">--</span>
+    </div>
+    <div class="soc-row soc-none" id="soc-row">
+      <span class="soc-value" id="soc-value">--</span><span class="soc-unit">%</span>
+    </div>
+    <div class="soc-bar"><div class="soc-bar-fill" id="soc-bar-fill"></div></div>
+    <div class="solar-grid">
+      <div class="solar-item">
+        <div class="solar-item-label">バッテリー電圧</div>
+        <div class="solar-item-value" id="solar-voltage">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">充電電力</div>
+        <div class="solar-item-value" id="solar-charge">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">本日の発電</div>
+        <div class="solar-item-value" id="solar-generation">--</div>
+      </div>
+    </div>
+    <div class="meta">
+      <div>
+        <span class="heartbeat-dot" id="solar-dot"></span>
+        <span id="solar-hb-label">コントローラー: 確認中</span>
+      </div>
+      <div id="solar-fault-label"></div>
+    </div>
+  </div>
+
+  <div class="footer" id="footer"></div>
+
+  <script>
+    // /home/app/ のシェルにiframeで内包されている場合、シェル側のナビと重複するので隠す
+    if (window.self !== window.top) {
+      const nav = document.querySelector('.app-switch');
+      if (nav) nav.style.display = 'none';
+    }
+
+    // 時計
+    function updateClock() {
+      document.getElementById('clock').textContent =
+        new Date().toLocaleTimeString('ja-JP');
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    function formatTime(ts) {
+      return new Date(ts * 1000).toLocaleString('ja-JP');
+    }
+
+    // ══════════ 蓄電池（太陽光発電コントローラー） ══════════
+    // ESP32が /home/api/solar/report に定期POSTした最新値を、SSEで受けて表示する。
+    // catwatchのような専用heartbeatは無く、reportの受信自体が死活監視を兼ねる。
+
+    // ESP32の送信間隔は60秒。3回落ちたら「応答なし」とみなす。
+    const SOLAR_TIMEOUT_SEC = 180;
+    let solarLastReport = null;
+
+    const CHARGING_STATE_LABELS = {
+      deactivated:     '停止',
+      activated:       '待機',
+      mppt:            'MPPT充電中',
+      equalizing:      '均等化充電中',
+      boost:           'ブースト充電中',
+      float:           'フロート充電中',
+      current_limiting: '電流制限中',
+    };
+    // バッジを緑にする（＝実際に充電している）状態
+    const CHARGING_ACTIVE = ['mppt', 'equalizing', 'boost', 'float', 'current_limiting'];
+
+    function updateSolarFreshness() {
+      const dot = document.getElementById('solar-dot');
+      const label = document.getElementById('solar-hb-label');
+      if (solarLastReport === null) {
+        dot.className = 'heartbeat-dot';
+        label.textContent = 'コントローラー: 未受信';
+        return;
+      }
+      const ageSec = Math.floor(Date.now() / 1000) - solarLastReport;
+      if (ageSec < SOLAR_TIMEOUT_SEC) {
+        dot.className = 'heartbeat-dot alive';
+        label.textContent = `コントローラー: 受信中 (${ageSec}秒前)`;
+      } else {
+        dot.className = 'heartbeat-dot stale';
+        label.textContent = `コントローラー: 応答なし (${formatTime(solarLastReport)})`;
+      }
+    }
+    setInterval(updateSolarFreshness, 5000);
+
+    // 値が無い場合に「--」を出すための共通処理（0は有効な値なので null/undefined のみ弾く）
+    function fmt(value, unit, digits = 0) {
+      if (value === null || value === undefined) return '--';
+      return value.toFixed(digits) + unit;
+    }
+
+    function applySolarState(s) {
+      // SOC
+      const socRow = document.getElementById('soc-row');
+      const socValue = document.getElementById('soc-value');
+      const socFill = document.getElementById('soc-bar-fill');
+
+      if (s.soc === null || s.soc === undefined) {
+        socRow.className = 'soc-row soc-none';
+        socValue.textContent = '--';
+        socFill.style.width = '0';
+      } else {
+        let level = 'soc-high', color = '#4caf50';
+        if (s.soc < 30)      { level = 'soc-low'; color = '#f44336'; }
+        else if (s.soc < 60) { level = 'soc-mid'; color = '#ffb300'; }
+        socRow.className = 'soc-row ' + level;
+        socValue.textContent = Math.round(s.soc);
+        socFill.style.width = Math.max(0, Math.min(100, s.soc)) + '%';
+        socFill.style.background = color;
+      }
+
+      // 充電状態バッジ
+      const badge = document.getElementById('solar-state');
+      if (s.chargingState) {
+        badge.textContent = CHARGING_STATE_LABELS[s.chargingState] || s.chargingState;
+        badge.className = 'state-badge ' +
+          (CHARGING_ACTIVE.includes(s.chargingState) ? 'charging' : 'idle');
+      } else {
+        badge.textContent = '--';
+        badge.className = 'state-badge';
+      }
+
+      document.getElementById('solar-voltage').textContent    = fmt(s.batteryVoltage, ' V', 1);
+      document.getElementById('solar-charge').textContent     = fmt(s.chargingPower, ' W');
+      document.getElementById('solar-generation').textContent = fmt(s.generationToday, ' Wh');
+
+      // 障害ビット（0なら正常なので何も出さない）
+      const fault = document.getElementById('solar-fault-label');
+      fault.textContent = s.fault ? `⚠️ 障害コード: 0x${s.fault.toString(16).toUpperCase()}` : '';
+      fault.style.color = s.fault ? '#f44336' : '';
+    }
+
+    function connectSolarSSE() {
+      const es = new EventSource('/home/api/solar/stream');
+
+      es.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'init' || data.type === 'report') {
+          solarLastReport = data.lastReport;
+          applySolarState(data);
+          updateSolarFreshness();
+        }
+      };
+
+      es.onerror = () => {
+        document.getElementById('footer').textContent = '接続エラー - 再接続中...';
+        es.close();
+        setTimeout(connectSolarSSE, 5000);
+      };
+
+      es.onopen = () => {
+        document.getElementById('footer').textContent = '';
+      };
+    }
+
+    connectSolarSSE();
+  </script>
+</body>
+</html>
