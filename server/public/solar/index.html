@@ -243,6 +243,14 @@
         <div class="solar-item-label">本日の発電</div>
         <div class="solar-item-value" id="solar-generation">--</div>
       </div>
+      <div class="solar-item">
+        <div class="solar-item-label">バッテリー温度</div>
+        <div class="solar-item-value" id="solar-battery-temp">--</div>
+      </div>
+      <div class="solar-item">
+        <div class="solar-item-label">コントローラー温度</div>
+        <div class="solar-item-value" id="solar-controller-temp">--</div>
+      </div>
     </div>
     <div class="meta">
       <div>
@@ -353,6 +361,8 @@
       document.getElementById('solar-voltage').textContent    = fmt(s.batteryVoltage, ' V', 1);
       document.getElementById('solar-charge').textContent     = fmt(s.chargingPower, ' W');
       document.getElementById('solar-generation').textContent = fmt(s.generationToday, ' Wh');
+      document.getElementById('solar-battery-temp').textContent = fmt(s.batteryTemp, ' °C');
+      document.getElementById('solar-controller-temp').textContent = fmt(s.controllerTemp, ' °C');
 
       // 障害ビット（0なら正常なので何も出さない）
       const fault = document.getElementById('solar-fault-label');

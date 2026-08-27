@@ -315,6 +315,19 @@ Alias /home/app /home/homeutils/server/public/app
 </Directory>
 ```
 
+### Apache 設定（Solar）
+
+太陽光発電（2026-08-27〜、ダッシュボード組み込み型から専用画面に変更。SOLAR.md §5.8参照）。
+他の専用画面と同じ静的Aliasパターン。`/home/api/solar/*` は既存の `ProxyPass /home/api/` で
+既にカバーされているため、新規のProxyPass設定は不要。
+
+```apache
+Alias /home/solar /home/homeutils/server/public/solar
+<Directory /home/homeutils/server/public/solar>
+    Require all granted
+</Directory>
+```
+
 ---
 
 ## 4. 新機能の追加方法（太陽光発電など）
