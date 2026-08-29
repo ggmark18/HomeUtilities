@@ -204,7 +204,8 @@
         card.remove();
         const content = document.getElementById('content');
         if (!content.querySelector('.detection-card')) {
-          content.innerHTML = '<div class="empty-state">レビュー待ちの検知はありません</div>';
+          // 判定対象が無くなったら、猫トイレ監視の最初の画面へ自動的に戻る
+          location.href = '/home/control/';
         }
       } catch (err) {
         alert('振り分けに失敗しました: ' + err.message);

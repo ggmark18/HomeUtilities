@@ -149,7 +149,31 @@
     history.replaceState(null, '', '#' + target);
   }
 
-  buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.target)));
+  // 各タブの「最初の画面」のURL。ボタンを押した時、サブページ（検知レビュー等）を
+  // 表示中であれば常にここへ戻す。
+  const homeUrls = {
+    bus: '/home/bus/',
+    cat: '/home/control/',
+    solar: '/home/solar/',
+  };
+
+  function resetToHome(target) {
+    const frame = frames[target];
+    const home = homeUrls[target];
+    if (!frame || !home) return;
+    try {
+      if (frame.contentWindow.location.pathname !== home) {
+        frame.src = home;
+      }
+    } catch (e) {
+      // 読み取れない場合（別オリジン等）は何もしない
+    }
+  }
+
+  buttons.forEach(b => b.addEventListener('click', () => {
+    resetToHome(b.dataset.target);
+    activate(b.dataset.target);
+  }));
 
   activate(location.hash.replace('#', '') || 'bus');
 </script>
