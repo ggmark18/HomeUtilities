@@ -320,8 +320,9 @@
     // ESP32が /home/api/solar/report に定期POSTした最新値を、SSEで受けて表示する。
     // catwatchのような専用heartbeatは無く、reportの受信自体が死活監視を兼ねる。
 
-    // ESP32の送信間隔は60秒。3回落ちたら「応答なし」とみなす。
-    const SOLAR_TIMEOUT_SEC = 180;
+    // ESP32の送信間隔は5分(300秒、device/esp32/renogy-rover.yamlのinterval参照)。
+    // 送信間隔ぴったりだと通信の揺らぎで誤って「応答なし」になるため、1分のバッファを足す。
+    const SOLAR_TIMEOUT_SEC = 360;
     let solarLastReport = null;
 
     const CHARGING_STATE_LABELS = {
